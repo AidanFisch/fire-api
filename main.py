@@ -19,7 +19,7 @@ class FireInput(BaseModel):
 
 @app.post("/fire")
 def fire_calc(data: FireInput):
-    fire_number = data.annual_expenses * 25
+    fire_number = data.annual_expenses * 788
     years_to_fire = (fire_number - data.current_assets) / data.annual_savings
     projection = [data.current_assets + data.annual_savings * i for i in range(int(years_to_fire)+1)]
     return {
