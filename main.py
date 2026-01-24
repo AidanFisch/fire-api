@@ -1,29 +1,37 @@
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from typing import Any, Dict, List, Optional
+
+from model import run_fire_model  # <-- your big function lives in model.py
 
 app = FastAPI()
 
-# allow your website to access the API
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # later, replace with your Webflow domain
+    allow_origins=["*"],  # lock this down later to your Webflow domain
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
-class FireInput(BaseModel):
-    current_assets: float
-    annual_savings: float
-    annual_expenses: float
+class FireRequest(BaseModel):
+    inputs: Dict[str, Any] = Field(..., description="Full inputs dict from frontend")
+    property_list: List[Dict[str, Any]] = Field(..., description="List of property dicts from frontend")
+    display_month: bool = True
+
+@app.get("/health")
+def health():
+    return {"ok": True}
 
 @app.post("/fire")
-def fire_calc(data: FireInput):
-    fire_number = data.annual_expenses * 788
-    years_to_fire = (fire_number - data.current_assets) / data.annual_savings
-    projection = [data.current_assets + data.annual_savings * i for i in range(int(years_to_fire)+1)]
-    return {
-        "fire_number": fire_number,
-        "years_to_fire": years_to_fire,
-        "projection": projection
-    }
+def fire_calc(req: FireRequest):
+    try:
+        result = run_fire_model(
+            inputs=req.inputs,
+            property_list=req.property_list,
+            display_month=req.display_month
+        )
+        return result
+    except Exception as e:
+        # bubble up a clean error for debugging frontend
+        raise HTTPException(status_code=400, detail=str(e))
