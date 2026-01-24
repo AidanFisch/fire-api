@@ -88,7 +88,7 @@ property_3_input = {
 }
 
 property_list_default = [property_1_input, property_2_input, property_3_input]
-# display_month = True
+# display_month = False
 
 
 
