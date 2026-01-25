@@ -169,8 +169,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     # =========================
 
     start_year = date.today().year
-    end_year = start_year + (inputs["end_age"] - inputs["current_age"])
-    months = pd.date_range(start=f"{start_year}-01-01", end=f"{end_year}-12-01", freq="MS")  # month-start
+    end_year = start_year + (inputs["end_age"] - inputs["current_age"]) - 1
+    months = pd.date_range(start=f"{start_year}-01-01", end=f"{end_year}-12-01", freq="MS")
 
     # Build base monthly dataframe
     dfm = pd.DataFrame({"Date": months})
@@ -331,6 +331,10 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Offset_Eligible_Balance_Total"] = 0.0
     dfm["Offset_Allocated_Total"] = 0.0
     dfm["Offset_Unused_Cash"] = 0.0
+    dfm["Total_Property_Value"] = 0.0
+    dfm["Total_Mortgage_Balance"] = 0.0
+    dfm["Net_Worth_Ex_PPOR"] = 0.0  # optional but useful
+    dfm["Net_Worth_Incl_PPOR"] = 0.0  # optional but useful
 
     for i, row in dfm.iterrows():
         dt = row["Date"]
@@ -379,10 +383,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 # Apply purchase cashflow immediately so offset reflects reality this month
         cash_balance += purchase_cashflow_total
 
-
-        # ---- Offset allocation base: only positive cash can offset
-        # Determine total active mortgage balance for pro-rata allocation
-    # ---- Offset allocation base (WEIGHTED across OFFSET-ENABLED loans only)
+        # # ---- Offset allocation (use cash available at start-of-month AFTER purchases)
         available_offset_cash = max(cash_balance, 0.0)
 
         eligible_balances = {}
@@ -393,15 +394,20 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 if bal > 0:
                     eligible_balances[prefix] = bal
 
-        # Allocate the cash pool across eligible loans, with caps + redistribution
         offset_allocations = allocate_weighted_offset(available_offset_cash, eligible_balances)
-        eligible_total = sum(eligible_balances.values())
-        allocated_total = sum(offset_allocations.values())
 
-        dfm.loc[i, "Offset_Eligible_Balance_Total"] = eligible_total
-        dfm.loc[i, "Offset_Allocated_Total"] = allocated_total
-        dfm.loc[i, "Offset_Unused_Cash"] = max(available_offset_cash - allocated_total, 0.0)
+        dfm.loc[i, "Offset_Eligible_Balance_Total"] = sum(eligible_balances.values())
+        dfm.loc[i, "Offset_Allocated_Total"] = sum(offset_allocations.values())
+        dfm.loc[i, "Offset_Unused_Cash"] = max(available_offset_cash - dfm.loc[i, "Offset_Allocated_Total"], 0.0)
 
+
+
+        # ---- Offset allocation base: only positive cash can offset
+        # Determine total active mortgage balance for pro-rata allocation
+
+
+
+        # offset_allocations = {p["name"].replace(" ", "_"): 0.0 for p in property_list}
 
 
 
@@ -419,11 +425,61 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 continue
 
             loan_bal = prop_state[prefix]["loan_balance"]
+
             if loan_bal <= 0:
-                # paid off
+                # loan is paid off, but the property is still active and still has:
+                # - value growth
+                # - rent (if IP)
+                # - running costs
+                # so we must keep writing those columns each month
+
                 prop_state[prefix]["loan_balance"] = 0.0
+
+                # keep compounding value + rent
+                prop_state[prefix]["property_value"] *= monthly_growth_factor(p["property_growth"])
+                if not p.get("is_owner_occupied", False):
+                    prop_state[prefix]["rent_monthly"] *= monthly_growth_factor(p["rental_growth"])
+
+                strata_m = (p["strata_quarterly"] * 4) / 12.0
+                rates_m  = (p["rates_quarterly"] * 4) / 12.0
+                other_m  = p["other_costs_monthly"]
+
+                # paid off => no interest/principal/payment
+                interest_m = 0.0
+                principal_m = 0.0
+                actual_pmt_m = 0.0
+                offset_alloc = 0.0
+
+                if p.get("is_owner_occupied", False):
+                    owner_cost_m = strata_m + rates_m + other_m
+                    net_rent_m = 0.0
+                else:
+                    owner_cost_m = 0.0
+                    net_rent_m = prop_state[prefix]["rent_monthly"] - strata_m - rates_m - other_m
+
+                # write outputs so yearly rollup "last"/"sum" never becomes 0
                 dfm.loc[i, f"{prefix}_Mortgage_Balance"] = 0.0
+                dfm.loc[i, f"{prefix}_Monthly_Mortgage_PMT"] = 0.0
+                dfm.loc[i, f"{prefix}_Mortgage_Interest"] = 0.0
+                dfm.loc[i, f"{prefix}_Mortgage_Principal"] = 0.0
+                dfm.loc[i, f"{prefix}_Property_Value"] = prop_state[prefix]["property_value"]
+                dfm.loc[i, f"{prefix}_Rent_Income"] = prop_state[prefix]["rent_monthly"]
+                dfm.loc[i, f"{prefix}_Strata"] = strata_m
+                dfm.loc[i, f"{prefix}_Rates"] = rates_m
+                dfm.loc[i, f"{prefix}_Other_Costs"] = other_m
+                dfm.loc[i, f"{prefix}_Offset_Allocated"] = 0.0
+                dfm.loc[i, f"{prefix}_Net_Rent"] = net_rent_m
+
+                total_owner_costs += owner_cost_m
+                total_net_rent += net_rent_m
+                total_interest += 0.0
+                total_principal += 0.0
+                total_pmt += 0.0
+                total_running_costs += (strata_m + rates_m + other_m)
+
                 continue
+
+
 
             # Grow property value + rent monthly
             prop_state[prefix]["property_value"] *= monthly_growth_factor(p["property_growth"])
@@ -442,6 +498,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             if p.get("use_offset", False):
                 offset_alloc = float(offset_allocations.get(prefix, 0.0))
                 offset_alloc = min(offset_alloc, loan_bal)
+                offset_alloc = max(offset_alloc, 0.0) 
+
 
             
 
@@ -449,15 +507,22 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
             # Mortgage calc (monthly)
             r_m = monthly_rate(p["interest_rate"])
-            interest_m = max(0.0, loan_bal - offset_alloc) * r_m
             pmt_m = prop_state[prefix]["monthly_pmt"]
 
-            # Final-month guard so balance never goes negative
+
+            # Mortgage calc (monthly)
+            r_m = monthly_rate(p["interest_rate"])
+            pmt_m = prop_state[prefix]["monthly_pmt"]
+
+            interest_m = max(loan_bal - offset_alloc, 0.0) * r_m
+
+            # repayment still happens even if interest is 0
             principal_m = min(max(pmt_m - interest_m, 0.0), loan_bal)
-            # If the scheduled PMT is larger than needed at the end, true payment is interest+principal
             actual_pmt_m = interest_m + principal_m
 
+
             loan_bal_end = loan_bal - principal_m
+            assert abs((loan_bal - principal_m) - loan_bal_end) < 1e-6
             prop_state[prefix]["loan_balance"] = loan_bal_end
 
             # Decrement remaining months (not strictly needed, but keeps PMT logic sane if you later refinance)
@@ -491,6 +556,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             dfm.loc[i, f"{prefix}_Rates"] = rates_m
             dfm.loc[i, f"{prefix}_Other_Costs"] = other_m
             dfm.loc[i, f"{prefix}_Offset_Allocated"] = min(offset_alloc, loan_bal_end)
+
             # dfm.loc[i, f"{prefix}_Offset_Allocated"] = offset_alloc
             dfm.loc[i, f"{prefix}_Net_Rent"] = net_rent_m
             
@@ -505,6 +571,26 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         dfm.loc[i, "Total_Net_Rent"] = total_net_rent
 
+            # ---- TOTALS (property & mortgage rollups)
+        total_prop_value = 0.0
+        total_mort_bal = 0.0
+        ppor_value = 0.0
+
+        for p in property_list:
+            prefix = p["name"].replace(" ", "_")
+            if not prop_state[prefix]["active"]:
+                continue
+
+            total_prop_value += float(prop_state[prefix]["property_value"])
+            total_mort_bal += float(max(prop_state[prefix]["loan_balance"], 0.0))
+
+            if p.get("is_owner_occupied", False):
+                ppor_value += float(prop_state[prefix]["property_value"])
+
+        dfm.loc[i, "Total_Property_Value"] = total_prop_value
+        dfm.loc[i, "Total_Mortgage_Balance"] = total_mort_bal
+
+
         # ---- PAYG SMOOTHED TAX (monthly withholding)
 
         # Annualise current run-rate income
@@ -516,7 +602,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         # Pay 1/12 each month
         tax_paid_this_month = estimated_annual_tax / 12.0
 
-        dfm.loc[i, "Tax_Paid"] = tax_paid_this_month
 
         # ---- Taxable income accrues monthly (salary + net rent). Tax paid once at December.
 
@@ -538,7 +623,37 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             - tax_paid_this_month
         )
 
+        # ---- Offset allocation AFTER true cash balance is known
+#         available_offset_cash = max(cash_balance, 0.0)
+
+#         eligible_balances = {}
+#         for p in property_list:
+#             prefix = p["name"].replace(" ", "_")
+#             if prop_state[prefix]["active"] and p.get("use_offset", False):
+#                 bal = float(max(prop_state[prefix]["loan_balance"], 0.0))
+#                 if bal > 0:
+#                     eligible_balances[prefix] = bal
+
+
+
+
+#         offset_allocations = allocate_weighted_offset(
+#             available_offset_cash,
+#             eligible_balances
+#         )
+
+#         dfm.loc[i, "Offset_Eligible_Balance_Total"] = sum(eligible_balances.values())
+#         dfm.loc[i, "Offset_Allocated_Total"] = sum(offset_allocations.values())
+#         dfm.loc[i, "Offset_Unused_Cash"] = max(
+#             available_offset_cash - dfm.loc[i, "Offset_Allocated_Total"], 0.0
+# )
+
+
         dfm.loc[i, "Cash_Balance_End"] = cash_balance
+                # ---- Net worth (end-of-month)
+        dfm.loc[i, "Net_Worth_Incl_PPOR"] = cash_balance + stock_balance + total_prop_value - total_mort_bal
+        dfm.loc[i, "Net_Worth_Ex_PPOR"] = cash_balance + stock_balance + (total_prop_value - ppor_value) - total_mort_bal
+
 
 
     ### toggle display
@@ -554,7 +669,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
       dfm["Age"] = dfm["Age"].round(2)
       dfm["t_years"] = dfm["t_years"].round(3)
 
-      print(dfm.to_csv(index=False))
+      # print(dfm.to_csv(index=False))
 
 
     else:
@@ -615,7 +730,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
       # Yearly summary (what you were printing before)
       dfy = dfy.round(0).astype(int)
-      print(dfy.to_csv(index=False))
+      # print(dfy.to_csv(index=False))
 
 
     if display_month:
@@ -632,9 +747,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         "rows": out.to_dict(orient="records")
     }
 
-result = run_fire_model(inputs_default, property_list_default, display_month=True)
+result = run_fire_model(inputs_default, property_list_default, display_month=False)
 
-# # quick sanity checks
+# quick sanity checks
 # print(result["mode"])
 # print(len(result["rows"]), "rows")
 # print(result["columns"][:20])
