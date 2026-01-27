@@ -335,6 +335,10 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Total_Mortgage_Balance"] = 0.0
     dfm["Net_Worth_Ex_PPOR"] = 0.0  # optional but useful
     dfm["Net_Worth_Incl_PPOR"] = 0.0  # optional but useful
+    dfm["Total_Property_Equity"] = 0.0
+    dfm["Total_Property_Equity_Ex_PPOR"] = 0.0
+    dfm["Total_Property_Value_Ex_PPOR"] = 0.0
+    dfm["Total_Mortgage_Balance_Ex_PPOR"] = 0.0
 
     for i, row in dfm.iterrows():
         dt = row["Date"]
@@ -575,20 +579,37 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         total_prop_value = 0.0
         total_mort_bal = 0.0
         ppor_value = 0.0
+        ppor_mort = 0.0
 
         for p in property_list:
             prefix = p["name"].replace(" ", "_")
             if not prop_state[prefix]["active"]:
                 continue
 
-            total_prop_value += float(prop_state[prefix]["property_value"])
-            total_mort_bal += float(max(prop_state[prefix]["loan_balance"], 0.0))
+            v = float(prop_state[prefix]["property_value"])
+            b = float(max(prop_state[prefix]["loan_balance"], 0.0))
+
+            total_prop_value += v
+            total_mort_bal += b
 
             if p.get("is_owner_occupied", False):
-                ppor_value += float(prop_state[prefix]["property_value"])
+                ppor_value += v
+                ppor_mort += b
 
+        # ✅ Write totals
         dfm.loc[i, "Total_Property_Value"] = total_prop_value
         dfm.loc[i, "Total_Mortgage_Balance"] = total_mort_bal
+
+        # ✅ Add these totals (equity + ex-PPOR breakdown)
+        dfm.loc[i, "Total_Property_Equity"] = max(total_prop_value - total_mort_bal, 0.0)
+
+        dfm.loc[i, "Total_Property_Value_Ex_PPOR"] = max(total_prop_value - ppor_value, 0.0)
+        dfm.loc[i, "Total_Mortgage_Balance_Ex_PPOR"] = max(total_mort_bal - ppor_mort, 0.0)
+        dfm.loc[i, "Total_Property_Equity_Ex_PPOR"] = max(
+            dfm.loc[i, "Total_Property_Value_Ex_PPOR"] - dfm.loc[i, "Total_Mortgage_Balance_Ex_PPOR"],
+            0.0
+        )
+
 
 
         # ---- PAYG SMOOTHED TAX (monthly withholding)
@@ -708,6 +729,14 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
               f"{prefix}_Offset_Allocated": "last",  # end-of-year allocated (snapshot)
               f"{prefix}_Net_Rent": "sum",
               f"{prefix}_Purchase_Cashflow": "sum",
+              "Total_Property_Value": "last",
+              "Total_Mortgage_Balance": "last",
+              "Total_Property_Equity": "last",
+              "Total_Property_Value_Ex_PPOR": "last",
+              "Total_Mortgage_Balance_Ex_PPOR": "last",
+              "Total_Property_Equity_Ex_PPOR": "last",
+              "Net_Worth_Incl_PPOR": "last",
+              "Net_Worth_Ex_PPOR": "last",
           })
 
       dfy = dfm.groupby("Year", as_index=False).agg(agg)
@@ -720,6 +749,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Cash_Balance_End": "Cumulative_Savings",
           "Stock_Balance_End": "Total_Stock_Balance",
           "Tax_Paid": "Tax_Payable_Paid",
+          "Total_Property_Value": "Property_Value_Total",
+          "Total_Mortgage_Balance": "Mortgage_Balance_Total",
+          "Total_Property_Equity": "Property_Equity_Total",
       })
 
       # =========================
