@@ -1,6 +1,6 @@
 
 
-
+  
   # =========================
   # INPUTS
   # =========================
@@ -10,34 +10,28 @@ inputs_default = {
     "inflation": 0.025,
     "todays_lifestyle_income": 80000,
     "initial_savings": 500000,
-    "current_income": 310000,
+    "current_income": 200000,
     "current_expenses": 64000,
     "average_salary_increase": 0.035,
     "end_age": 60,
+
     "stock_growth": 0.06,
     "stock_yearly_contribution": 20000,
     "starting_stock_value": 35000,
-    # ---- SUPER (NEW)
-    "super_starting_balance": 120000,
-    "super_sg_rate": 0.11,                 # SG rate (11% from 2025)
-    "super_growth": 0.065,                 # long-term return assumption
-    "super_additional_annual": 0,          # voluntary extra, $/yr (affects cash)
-    "fire_swr": 0.04,          # 4% rule
-    "super_access_age": 60,    # when super can be drawn
 }
 
 property_1_input = {
     "id": 1,
     "name": "Apartment",
-    "purchase_price": 380000,
+    "purchase_price": 400000,
     "current_value": 640000,
-    "original_loan": 304000,
+    "original_loan": 325000,
     "loan_balance_current": 215000,
-    "purchase_fees": 0,
-    "monthly_rent": 1512,
-    "strata_quarterly": 0,
-    "rates_quarterly": 0,
-    "other_costs_monthly": 0,
+    "purchase_fees": 20000,
+    "monthly_rent": 2400,
+    "strata_quarterly": 1200,
+    "rates_quarterly": 900,
+    "other_costs_monthly": 200,
     "interest_rate": 0.055,
     "property_growth": 0.03,
     "rental_growth": 0.03,
@@ -49,21 +43,21 @@ property_1_input = {
 }
 
 property_2_input = {
-    "id": 2,
+    "id": 2,  
     "name": "House",
-    "purchase_price": 1600000,
-    "current_value": 1600000,
-    "original_loan": 1280000,
-    "loan_balance_current": 1280000,
-    "purchase_fees": 80000,
-    "monthly_rent": 5333,
-    "strata_quarterly": 0,
-    "rates_quarterly": 0,
-    "other_costs_monthly": 0,
+    "purchase_price": 750000,
+    "current_value": 820000,
+    "original_loan": 600000,
+    "loan_balance_current": 540000,
+    "purchase_fees": 35000,
+    "monthly_rent": 3200,
+    "strata_quarterly": 1200,
+    "rates_quarterly": 900,
+    "other_costs_monthly": 200,
     "interest_rate": 0.055,
     "property_growth": 0.03,
     "rental_growth": 0.03,
-    "year_bought": 2026,
+    "year_bought": 2028,
     "loan_term_years": 30,
     "use_offset": True,
     "is_owner_occupied": False
@@ -73,19 +67,19 @@ property_2_input = {
 property_3_input = {
     "id": 3,
     "name": "PPOR",
-    "purchase_price": 1100000,
-    "current_value": 1100000,
-    "original_loan": 650000,
+    "purchase_price": 1200000,
+    "current_value": 1200000,
+    "original_loan": 900000,
     "loan_balance_current": 0,   # if buying in future
-    "purchase_fees": 30000,
+    "purchase_fees": 40000,
     "monthly_rent": 0,           # MUST be 0
     "strata_quarterly": 0,        # optional
-    "rates_quarterly": 0,
-    "other_costs_monthly": 0,
+    "rates_quarterly": 900,
+    "other_costs_monthly": 300,
     "interest_rate": 0.055,
     "property_growth": 0.03,
     "rental_growth": 0.0,         # MUST be 0
-    "year_bought": 2031,
+    "year_bought": 2027,
     "loan_term_years": 30,
     "use_offset": True,
 
@@ -129,7 +123,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             raise ValueError(f"Property[{idx}] missing keys: {sorted(missing_p)}")
 
 
-
+  
 
     # =========================
     # TAX (annual)
@@ -186,7 +180,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Age"] = inputs["current_age"] + dfm["t_months"] / 12.0
 
     # Salary/expenses grow with YEARS FROM NOW (not "i from birth")
-    dfm["t_years"] = (dfm["t_months"]+1) / 12.0
+    dfm["t_years"] = dfm["t_months"] / 12.0
 
     # Use annual compounding continuously via (1+g)^(t_years)
     dfm["Salary_Annual"] = inputs["current_income"] * ((1 + inputs["average_salary_increase"]) ** dfm["t_years"])
@@ -195,22 +189,10 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Salary_Monthly"] = dfm["Salary_Annual"] / 12.0
     dfm["Expenses_Monthly"] = dfm["Expenses_Annual"] / 12.0
 
-    dfm["Target_Annual_Infl_Adj"] = inputs["todays_lifestyle_income"] * ((1 + inputs["inflation"]) ** dfm["t_years"])
-    dfm["Target_Monthly_Infl_Adj"] = dfm["Target_Annual_Infl_Adj"] / 12.0
-
-
     # Stocks monthly
     stock_m_growth = monthly_growth_factor(inputs["stock_growth"]) - 1
     dfm["Stock_Contribution_Annual"] = inputs["stock_yearly_contribution"] * ((1 + inputs["inflation"]) ** dfm["t_years"])
     dfm["Stock_Contribution_Monthly"] = dfm["Stock_Contribution_Annual"] / 12.0
-
-    # ---- Super monthly
-    super_m_growth = monthly_growth_factor(inputs["super_growth"]) - 1
-
-    # voluntary contribution (annual -> monthly)
-    dfm["Super_Extra_Annual"] = float(inputs.get("super_additional_annual", 0.0)) * ((1 + inputs["inflation"]) ** dfm["t_years"])
-    dfm["Super_Extra_Monthly"] = dfm["Super_Extra_Annual"] / 12.0
-
 
 
 
@@ -315,8 +297,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
     cash_balance = float(inputs["initial_savings"])  # this is your offset/savings bucket
     stock_balance = float(inputs["starting_stock_value"])
-    super_balance = float(inputs.get("super_starting_balance", 0.0))
-
 
 
 
@@ -324,7 +304,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     for p in property_list:
         prefix = p["name"].replace(" ", "_")
         for col in [
-            "Mortgage_Balance_Start",
             "Mortgage_Balance",
             "Monthly_Mortgage_PMT",
             "Mortgage_Interest",
@@ -339,7 +318,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             "Purchase_Cashflow",
         ]:
             dfm[f"{prefix}_{col}"] = 0.0
-        dfm[f"{prefix}_Active"] = 0   # ✅ add this
 
     for p in property_list:
       prefix = p["name"].replace(" ", "_")
@@ -349,13 +327,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Tax_Paid"] = 0.0
     dfm["Cash_Balance_End"] = 0.0
     dfm["Stock_Balance_End"] = 0.0
-    dfm["Stock_Growth_Accrued"] = 0.0
-    # ---- Super columns
-    dfm["Super_Balance_End"] = 0.0
-    dfm["Super_Growth_Accrued"] = 0.0
-    dfm["Super_SG_Contribution"] = 0.0
-    dfm["Super_Extra_Contribution"] = 0.0
-
+    dfm["Stock_Growth_Monthly"] = 0.0
     dfm["Offset_Eligible_Balance_Total"] = 0.0
     dfm["Offset_Allocated_Total"] = 0.0
     dfm["Offset_Unused_Cash"] = 0.0
@@ -367,28 +339,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Total_Property_Equity_Ex_PPOR"] = 0.0
     dfm["Total_Property_Value_Ex_PPOR"] = 0.0
     dfm["Total_Mortgage_Balance_Ex_PPOR"] = 0.0
-    dfm["Net_Worth_Incl_Super_Incl_PPOR"] = 0.0
-    dfm["Net_Worth_Incl_Super_Ex_PPOR"] = 0.0
-
-    dfm["Stock_Drawdown_Monthly"] = 0.0
-    dfm["Super_Drawdown_Monthly"] = 0.0
-    dfm["FIRE_Income_Monthly"] = 0.0
-    dfm["FIRE_Eligible"] = 0
-    dfm["FIRE_Age"] = np.nan
-    dfm["Fire_Replacement_Cashflow_Monthly"] = 0.0
-    dfm["Fire_Principal_Service_Monthly"] = 0.0
-    dfm["Fire_Target_Monthly"] = 0.0
-    dfm["Fire_Gap_Monthly"] = 0.0
-
-    dfm["Salary_Paid"] = 0.0
-    
-    dfm["Stock_Contrib_Paid"] = 0.0
-    dfm["Expenses_Paid"] = 0.0
-    
-
-
-    fired = False
-    fire_age = None
 
     for i, row in dfm.iterrows():
         dt = row["Date"]
@@ -398,43 +348,15 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         # ---- Stock update (monthly)
         stock_growth_amt = stock_balance * stock_m_growth
-        stock_contrib = 0.0 if fired else row["Stock_Contribution_Monthly"]
-        stock_balance += stock_growth_amt + stock_contrib
+        stock_balance += stock_growth_amt + row["Stock_Contribution_Monthly"]
 
-
-        dfm.loc[i, "Stock_Growth_Accrued"] = stock_growth_amt
+        dfm.loc[i, "Stock_Growth_Monthly"] = stock_growth_amt
         dfm.loc[i, "Stock_Balance_End"] = stock_balance
 
         # ---- Income/expenses (monthly)
-        salary_m_raw = row["Salary_Monthly"]
-        salary_m = salary_m_raw if not fired else 0.0
-
+        salary_m = row["Salary_Monthly"]
         expenses_m = row["Expenses_Monthly"]
-
-        stock_contrib_m = 0.0 if fired else stock_contrib
-        
-
-
-        dfm.loc[i, "Salary_Paid"] = salary_m
-        
-
-        dfm.loc[i, "Stock_Contrib_Paid"] = stock_contrib
-
-
-        # ---- Super update (monthly)
-        # ---- Super update (monthly)
-        super_sg_m = 0.0 if fired else (salary_m * float(inputs.get("super_sg_rate", 0.0)))  # ✅ SG stops too
-        super_extra_m = float(row.get("Super_Extra_Monthly", 0.0))                            # voluntary still optional
-
-
-        super_growth_amt = super_balance * super_m_growth
-        super_balance += super_growth_amt + super_sg_m + super_extra_m
-
-        dfm.loc[i, "Super_Growth_Accrued"] = super_growth_amt
-        dfm.loc[i, "Super_SG_Contribution"] = super_sg_m
-        dfm.loc[i, "Super_Extra_Contribution"] = super_extra_m
-        dfm.loc[i, "Super_Balance_End"] = super_balance
-
+        stock_contrib_m = row["Stock_Contribution_Monthly"]
 
         # ---- Activate purchases (if year_bought == this month)
         purchase_cashflow_total = 0.0
@@ -450,10 +372,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 # Initialise property at purchase
                 prop_state[prefix]["active"] = True
                 prop_state[prefix]["loan_balance"] = float(p["original_loan"])
-                # ✅ ensure the "start" value is not left at 0 for this year
-                dfm.loc[i, f"{prefix}_Mortgage_Balance_Start"] = prop_state[prefix]["loan_balance"]
-                dfm.loc[i, f"{prefix}_Mortgage_Balance"] = prop_state[prefix]["loan_balance"]  # optional but helpful
-
                 prop_state[prefix]["property_value"] = float(p["purchase_price"])
                 prop_state[prefix]["rent_monthly"] = float(p["monthly_rent"])
 
@@ -481,7 +399,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                     eligible_balances[prefix] = bal
 
         offset_allocations = allocate_weighted_offset(available_offset_cash, eligible_balances)
-        
+
         dfm.loc[i, "Offset_Eligible_Balance_Total"] = sum(eligible_balances.values())
         dfm.loc[i, "Offset_Allocated_Total"] = sum(offset_allocations.values())
         dfm.loc[i, "Offset_Unused_Cash"] = max(available_offset_cash - dfm.loc[i, "Offset_Allocated_Total"], 0.0)
@@ -495,7 +413,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         # offset_allocations = {p["name"].replace(" ", "_"): 0.0 for p in property_list}
 
-        
 
 
         # ---- Property monthly mechanics
@@ -509,14 +426,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         for p in property_list:
             prefix = p["name"].replace(" ", "_")
             if not prop_state[prefix]["active"]:
-                dfm.loc[i, f"{prefix}_Mortgage_Balance_Start"] = 0.0
-                dfm.loc[i, f"{prefix}_Mortgage_Balance"] = 0.0
                 continue
 
-            dfm.loc[i, f"{prefix}_Active"] = 1 
             loan_bal = prop_state[prefix]["loan_balance"]
-
-            dfm.loc[i, f"{prefix}_Mortgage_Balance_Start"] = loan_bal
 
             if loan_bal <= 0:
                 # loan is paid off, but the property is still active and still has:
@@ -590,10 +502,10 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             if p.get("use_offset", False):
                 offset_alloc = float(offset_allocations.get(prefix, 0.0))
                 offset_alloc = min(offset_alloc, loan_bal)
-                offset_alloc = max(offset_alloc, 0.0)
+                offset_alloc = max(offset_alloc, 0.0) 
 
 
-
+            
 
 
 
@@ -634,11 +546,10 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                     - strata_m
                     - rates_m
                     - other_m
-                )
+        )
 
 
             # Write row outputs
-            
             dfm.loc[i, f"{prefix}_Mortgage_Balance"] = loan_bal_end
             dfm.loc[i, f"{prefix}_Monthly_Mortgage_PMT"] = actual_pmt_m
             dfm.loc[i, f"{prefix}_Mortgage_Interest"] = interest_m
@@ -648,12 +559,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             dfm.loc[i, f"{prefix}_Strata"] = strata_m
             dfm.loc[i, f"{prefix}_Rates"] = rates_m
             dfm.loc[i, f"{prefix}_Other_Costs"] = other_m
-            dfm.loc[i, f"{prefix}_Offset_Allocated"] = min(offset_alloc, loan_bal)
-
+            dfm.loc[i, f"{prefix}_Offset_Allocated"] = min(offset_alloc, loan_bal_end)
 
             # dfm.loc[i, f"{prefix}_Offset_Allocated"] = offset_alloc
             dfm.loc[i, f"{prefix}_Net_Rent"] = net_rent_m
-
+            
             # dfm[f"{prefix}_Is_PPOR"] = int(p.get("is_owner_occupied", False))
 
             total_owner_costs += owner_cost_m
@@ -665,84 +575,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         dfm.loc[i, "Total_Net_Rent"] = total_net_rent
 
-
-        # =========================
-        # FIRE VIABILITY CHECK (CASHFLOW-BASED)
-        # =========================
-
-
-
-        # Allowed deterministic drawdowns (DO NOT mutate balances here)
-        stock_draw_m = (stock_balance * inputs["fire_swr"]) / 12.0
-
-        super_draw_m = 0.0
-        if row["Age"] >= inputs["super_access_age"]:
-            super_draw_m = (super_balance * inputs["fire_swr"]) / 12.0
-
-        # Mortgage principal MUST be serviceable post-FIRE
-        principal_service_m = total_principal
-
-        taxable_fire_income_m = total_net_rent
-
-        # Stock drawdown – assume 50% CGT discount
-        taxable_fire_income_m = total_net_rent + (stock_draw_m * 0.5)
-        # (super ignored / assumed tax-free)
-        fire_annual_tax = tax_payable(max(taxable_fire_income_m * 12.0, 0.0))  # optional floor at 0 for the tax function
-        fire_tax_m = fire_annual_tax / 12.0
-
-        
-
-
-
-        # Replacement income AFTER FIRE (salary replacement)
-        fire_replacement_cashflow_m = (
-            total_net_rent
-            + stock_draw_m
-            + super_draw_m
-            - principal_service_m
-            - fire_tax_m
-
-        )
-
-        target_m = row["Target_Monthly_Infl_Adj"]
-
-        fire_gap_m = fire_replacement_cashflow_m - target_m
-
-        dfm.loc[i, "Stock_Drawdown_Monthly"] = stock_draw_m
-        dfm.loc[i, "Super_Drawdown_Monthly"] = super_draw_m
-        dfm.loc[i, "FIRE_Income_Monthly"] = fire_replacement_cashflow_m
-
-
-        dfm.loc[i, "Fire_Replacement_Cashflow_Monthly"] = fire_replacement_cashflow_m
-        dfm.loc[i, "Fire_Principal_Service_Monthly"] = principal_service_m
-        dfm.loc[i, "Fire_Target_Monthly"] = target_m 
-        dfm.loc[i, "Fire_Gap_Monthly"] = fire_gap_m
-
-        eligible_now = fire_gap_m >= 0
-
-        if (not fired) and eligible_now:
-            fired = True
-            fire_age = float(row["Age"])
-
-        dfm.loc[i, "FIRE_Eligible"] = 1 if fired else 0
-        dfm.loc[i, "FIRE_Age"] = fire_age if fire_age is not None else np.nan
-
-        # =========================
-        # ACTUAL ASSET WITHDRAWALS (POST-FIRE ONLY)
-        # =========================
-
-        stock_withdraw_m = 0.0
-        super_withdraw_m = 0.0
-
-        if fired:
-            stock_withdraw_m = stock_draw_m
-            stock_balance -= stock_withdraw_m
-
-            if row["Age"] >= inputs["super_access_age"]:
-                super_withdraw_m = super_draw_m
-                super_balance -= super_withdraw_m
-
-
+            # ---- TOTALS (property & mortgage rollups)
         total_prop_value = 0.0
         total_mort_bal = 0.0
         ppor_value = 0.0
@@ -778,47 +611,23 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         )
 
 
-        # ---- TAXABLE INCOME (allow negative gearing)
-        taxable_property_income_m = total_net_rent   # can be negative now (negative gearing)
-        taxable_stock_income_m = 0.0 if not fired else (stock_draw_m * 0.5)  # 50% CGT discount assumption
-        taxable_super_income_m = 0.0  # assume tax-free after access age (your assumption)
 
-        taxable_income_m = taxable_property_income_m + taxable_stock_income_m + taxable_super_income_m
+        # ---- PAYG SMOOTHED TAX (monthly withholding)
 
-        # Salary adds to taxable income while working
-        taxable_income_m += salary_m
+        # Annualise current run-rate income
+        annualised_taxable_income = (salary_m + total_net_rent) * 12.0
 
-        annualised_taxable_income = taxable_income_m * 12.0
+        # Estimate full-year tax
         estimated_annual_tax = tax_payable(annualised_taxable_income)
 
+        # Pay 1/12 each month
         tax_paid_this_month = estimated_annual_tax / 12.0
-        dfm.loc[i, "Tax_Paid"] = tax_paid_this_month
-
-
-
-
-
-
-        # # ---- PAYG SMOOTHED TAX (monthly withholding)
-
-        # taxable_fire_income_m = max(taxable_fire_income_m, 0.0)
-
-
-        # # Annualise current run-rate income
-        # annualised_taxable_income = (salary_m + taxable_fire_income_m) * 12.0
-
-
-        # # Estimate full-year tax
-        # estimated_annual_tax = tax_payable(annualised_taxable_income)
-
-        # # Pay 1/12 each month
-        # tax_paid_this_month = estimated_annual_tax / 12.0
 
 
         # ---- Taxable income accrues monthly (salary + net rent). Tax paid once at December.
 
 
-
+        dfm.loc[i, "Tax_Paid"] = tax_paid_this_month
 
         # ---- Cash balance update (THIS is your offset pool)
         # Cashflow rule:
@@ -829,18 +638,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             + salary_m
             - expenses_m
             - stock_contrib_m
-            - super_extra_m
             + total_net_rent
-            - total_owner_costs
+            - total_owner_costs 
             - total_principal
             - tax_paid_this_month
-            
         )
-
-                # =========================
-
-
-
 
         # ---- Offset allocation AFTER true cash balance is known
 #         available_offset_cash = max(cash_balance, 0.0)
@@ -871,26 +673,12 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         dfm.loc[i, "Cash_Balance_End"] = cash_balance
                 # ---- Net worth (end-of-month)
         dfm.loc[i, "Net_Worth_Incl_PPOR"] = cash_balance + stock_balance + total_prop_value - total_mort_bal
-        dfm.loc[i, "Net_Worth_Ex_PPOR"] = (
-          cash_balance
-          + stock_balance
-          + (total_prop_value - ppor_value)
-          - (total_mort_bal - ppor_mort)
-)
-        
-        dfm.loc[i, "Net_Worth_Incl_Super_Incl_PPOR"] = cash_balance + stock_balance + super_balance + total_prop_value - total_mort_bal
-        dfm.loc[i, "Net_Worth_Incl_Super_Ex_PPOR"] = (
-          cash_balance
-          + stock_balance
-          + super_balance
-          + (total_prop_value - ppor_value)
-          - (total_mort_bal - ppor_mort)
-)
+        dfm.loc[i, "Net_Worth_Ex_PPOR"] = cash_balance + stock_balance + (total_prop_value - ppor_value) - total_mort_bal
 
 
 
     ### toggle display
-
+    
     if display_month == True:
 
       # Round numeric columns only
@@ -908,60 +696,27 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     else:
       # =========================
       # ROLL UP TO YEARLY REPORT (end-of-year)
-      # dfm["Salary_Paid"] = dfm["Salary_Monthly"]
-
-
-      dfm["Expenses_Paid"] = dfm["Expenses_Monthly"]
       # =========================
 
       # Define aggregation: sums for flows, last for balances/values
       agg = {
-          "Age": "first",                      # (see note below)
-          "Salary_Annual": "last",
-          "Expenses_Annual": "last",
-          "Salary_Monthly": "last",           # run-rate monthly at end of year
+          "Age": "last",
+          "Salary_Annual": "last",           # end-of-year salary run rate
+          "Expenses_Annual": "last",         # end-of-year expense run rate
+          "Salary_Monthly": "last",
           "Expenses_Monthly": "last",
           "Stock_Contribution_Annual": "last",
-          "Stock_Contribution_Monthly": "last",
-          "Salary_Paid": "sum",
-          
-          "Expenses_Paid": "sum",             # ✅ total paid
-          "Stock_Contrib_Paid": "sum",        # ✅ total invested
-          "Stock_Growth_Accrued": "sum",
+          "Stock_Contribution_Monthly": "sum",
+          "Stock_Growth_Monthly": "sum",
           "Stock_Balance_End": "last",
-          "Super_Growth_Accrued": "sum",
-          "Super_SG_Contribution": "sum",
-          "Super_Extra_Contribution": "sum",
-          "Super_Balance_End": "last",
-          "Net_Worth_Incl_Super_Incl_PPOR": "last",
-          "Net_Worth_Incl_Super_Ex_PPOR": "last",
           "Total_Net_Rent": "sum",
           "Tax_Paid": "sum",
           "Cash_Balance_End": "last",
-          "Total_Property_Value": "last",
-          "Total_Mortgage_Balance": "last",
-          "Total_Property_Equity": "last",
-          "Total_Property_Value_Ex_PPOR": "last",
-          "Total_Mortgage_Balance_Ex_PPOR": "last",
-          "Total_Property_Equity_Ex_PPOR": "last",
-          "Net_Worth_Incl_PPOR": "last",
-          "Net_Worth_Ex_PPOR": "last",
-          "Target_Annual_Infl_Adj": "last",
-          "Target_Monthly_Infl_Adj": "last",
-          "Stock_Drawdown_Monthly": "last",
-          "Super_Drawdown_Monthly": "last",
-          "FIRE_Income_Monthly": "last",
-          "Fire_Target_Monthly": "last",
-          "Fire_Gap_Monthly": "last",
-          "FIRE_Eligible": "last",
-          "FIRE_Age": "last",
-
       }
 
       for p in property_list:
           prefix = p["name"].replace(" ", "_")
           agg.update({
-              f"{prefix}_Mortgage_Balance_Start": "first",  # ✅ ADD THIS
               f"{prefix}_Mortgage_Balance": "last",
               f"{prefix}_Monthly_Mortgage_PMT": "sum",  # total paid that year
               f"{prefix}_Mortgage_Interest": "sum",
@@ -982,14 +737,12 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
               "Total_Property_Equity_Ex_PPOR": "last",
               "Net_Worth_Incl_PPOR": "last",
               "Net_Worth_Ex_PPOR": "last",
-              "Target_Annual_Infl_Adj": "last",
-              "Target_Monthly_Infl_Adj": "last",
           })
 
       dfy = dfm.groupby("Year", as_index=False).agg(agg)
 
       # Optional: your original "target income" (inflation-adjusted) yearly
-      # dfy["Target_Income_Infl_Adj"] = inputs["todays_lifestyle_income"] * ((1 + inputs["inflation"]) ** (dfy["Year"] - start_year))
+      dfy["Target_Income_Infl_Adj"] = inputs["todays_lifestyle_income"] * ((1 + inputs["inflation"]) ** (dfy["Year"] - start_year))
 
       # Make names closer to your old CSV (you can rename further)
       dfy = dfy.rename(columns={
@@ -999,16 +752,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Total_Property_Value": "Property_Value_Total",
           "Total_Mortgage_Balance": "Mortgage_Balance_Total",
           "Total_Property_Equity": "Property_Equity_Total",
-          "Salary_Paid": "Salary_Total",
-          "Expenses_Paid": "Expenses_Total",
-          "Stock_Contrib_Paid": "Stock_Contrib_Total",
-          "Super_Balance_End": "Super_Balance",
-          "Super_SG_Contribution": "Super_SG_Total",
-          "Super_Extra_Contribution": "Super_Extra_Total",
-
       })
-
-      
 
       # =========================
       # OUTPUT
@@ -1017,8 +761,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
       # print(dfm.to_csv(index=False))
 
       # Yearly summary (what you were printing before)
-      dfy = dfy.round(0)
-      #print(dfy.to_csv(index=False))
+      dfy = dfy.round(0).astype(int)
+      # print(dfy.to_csv(index=False))
 
 
     if display_month:
