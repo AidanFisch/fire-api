@@ -1029,18 +1029,46 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         out = dfy
         mode = "yearly"
     
-    import numpy as np
-    import pandas as pd
+    rows = out.to_dict(orient="records")
 
-  
-    out = out.replace([np.inf, -np.inf], np.nan)
-    out = out.where(pd.notnull(out), None)  # NaN -> None (JSON null)
-
-    return {
+    result = {
         "mode": mode,
         "columns": out.columns.tolist(),
-        "rows": out.to_dict(orient="records")
+        "rows": rows
     }
+
+    return make_json_safe(result)
+
+
+import math
+
+def make_json_safe(x):
+    """Convert NaN/Inf (and numpy scalars) into JSON-safe Python values."""
+    try:
+        import numpy as np
+        numpy_int = (np.integer,)
+        numpy_float = (np.floating,)
+    except Exception:
+        numpy_int = tuple()
+        numpy_float = tuple()
+
+    if isinstance(x, dict):
+        return {k: make_json_safe(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [make_json_safe(v) for v in x]
+
+    # numpy scalars -> python scalars
+    if numpy_int and isinstance(x, numpy_int):
+        return int(x)
+    if numpy_float and isinstance(x, numpy_float):
+        x = float(x)
+
+    if isinstance(x, float):
+        if math.isnan(x) or math.isinf(x):
+            return None
+
+    return x
+
 
 result = run_fire_model(inputs_default, property_list_default, display_month=False)
 
