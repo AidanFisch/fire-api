@@ -10,7 +10,7 @@ inputs_default = {
     "inflation": 0.025,
     "todays_lifestyle_income": 80000,
     "initial_savings": 500000,
-    "current_income": 310000,
+    "current_income": 200000,
     "current_expenses": 64000,
     "average_salary_increase": 0.035,
     "end_age": 60,
@@ -29,12 +29,12 @@ inputs_default = {
 property_1_input = {
     "id": 1,
     "name": "Apartment",
-    "purchase_price": 380000,
+    "purchase_price": 400000,
     "current_value": 640000,
-    "original_loan": 304000,
+    "original_loan": 325000,
     "loan_balance_current": 215000,
-    "purchase_fees": 0,
-    "monthly_rent": 2600,
+    "purchase_fees": 20000,
+    "monthly_rent": 2400,
     "strata_quarterly": 1200,
     "rates_quarterly": 900,
     "other_costs_monthly": 200,
@@ -73,19 +73,19 @@ property_1_input = {
 property_3_input = {
     "id": 3,
     "name": "PPOR",
-    "purchase_price": 1100000,
-    "current_value": 1100000,
-    "original_loan": 650000,
+    "purchase_price": 1200000,
+    "current_value": 1200000,
+    "original_loan": 900000,
     "loan_balance_current": 0,   # if buying in future
-    "purchase_fees": 30000,
+    "purchase_fees": 40000,
     "monthly_rent": 0,           # MUST be 0
     "strata_quarterly": 0,        # optional
-    "rates_quarterly": 0,
-    "other_costs_monthly": 0,
+    "rates_quarterly": 900,
+    "other_costs_monthly": 300,
     "interest_rate": 0.055,
     "property_growth": 0.03,
     "rental_growth": 0.0,         # MUST be 0
-    "year_bought": 2031,
+    "year_bought": 2027,
     "loan_term_years": 30,
     "use_offset": True,
 
@@ -93,7 +93,8 @@ property_3_input = {
     "is_owner_occupied": True,
 }
 
-property_list_default = [property_1_input, property_2_input, property_3_input]
+# property_list_default = [property_1_input, property_2_input, property_3_input]
+property_list_default = [property_1_input, property_3_input]
 # display_month = False
 
 
@@ -655,8 +656,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             dfm.loc[i, f"{prefix}_Strata"] = strata_m
             dfm.loc[i, f"{prefix}_Rates"] = rates_m
             dfm.loc[i, f"{prefix}_Other_Costs"] = other_m
-            dfm.loc[i, f"{prefix}_Offset_Allocated"] = min(offset_alloc, loan_bal)
-
+            dfm.loc[i, f"{prefix}_Offset_Allocated"] = min(offset_alloc, loan_bal_end)
+            # dfm.loc[i, f"{prefix}_Offset_Allocated"] = min(offset_alloc, loan_bal)
 
             # dfm.loc[i, f"{prefix}_Offset_Allocated"] = offset_alloc
             dfm.loc[i, f"{prefix}_Net_Rent"] = net_rent_m
