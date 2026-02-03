@@ -34,10 +34,10 @@ property_1_input = {
     "original_loan": 304000,
     "loan_balance_current": 215000,
     "purchase_fees": 0,
-    "monthly_rent": 1512,
-    "strata_quarterly": 0,
-    "rates_quarterly": 0,
-    "other_costs_monthly": 0,
+    "monthly_rent": 2600,
+    "strata_quarterly": 1200,
+    "rates_quarterly": 900,
+    "other_costs_monthly": 200,
     "interest_rate": 0.055,
     "property_growth": 0.03,
     "rental_growth": 0.03,
@@ -48,27 +48,27 @@ property_1_input = {
 
 }
 
-property_2_input = {
-    "id": 2,
-    "name": "House",
-    "purchase_price": 1600000,
-    "current_value": 1600000,
-    "original_loan": 1280000,
-    "loan_balance_current": 1280000,
-    "purchase_fees": 80000,
-    "monthly_rent": 5333,
-    "strata_quarterly": 0,
-    "rates_quarterly": 0,
-    "other_costs_monthly": 0,
-    "interest_rate": 0.055,
-    "property_growth": 0.03,
-    "rental_growth": 0.03,
-    "year_bought": 2026,
-    "loan_term_years": 30,
-    "use_offset": True,
-    "is_owner_occupied": False
+# property_2_input = {
+#     "id": 2,
+#     "name": "House",
+#     "purchase_price": 1600000,
+#     "current_value": 1600000,
+#     "original_loan": 1280000,
+#     "loan_balance_current": 1280000,
+#     "purchase_fees": 80000,
+#     "monthly_rent": 5333,
+#     "strata_quarterly": 0,
+#     "rates_quarterly": 0,
+#     "other_costs_monthly": 0,
+#     "interest_rate": 0.055,
+#     "property_growth": 0.03,
+#     "rental_growth": 0.03,
+#     "year_bought": 2026,
+#     "loan_term_years": 30,
+#     "use_offset": True,
+#     "is_owner_occupied": False
 
-}
+# }
 
 property_3_input = {
     "id": 3,
@@ -106,13 +106,19 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     import numpy as np
     from datetime import date
 
+    REQUIRED_PROP_KEYS = {
+    "id","name","purchase_price","current_value","original_loan","loan_balance_current",
+    "purchase_fees","monthly_rent","strata_quarterly","rates_quarterly","other_costs_monthly",
+    "interest_rate","property_growth","rental_growth","year_bought","loan_term_years",
+    "use_offset","is_owner_occupied"
+}
 
 
     # Fallbacks for notebook testing
     if inputs is None:
         inputs = inputs_default
     if property_list is None:
-        property_list = property_list_default
+        property_list = []
 
     ###debugging###
     required_input_keys = set(inputs_default.keys())
@@ -124,9 +130,10 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     required_prop_keys = set().union(*(p.keys() for p in property_list_default))
 
     for idx, p in enumerate(property_list):
-        missing_p = required_prop_keys - set(p.keys())
+        missing_p = REQUIRED_PROP_KEYS - set(p.keys())
         if missing_p:
             raise ValueError(f"Property[{idx}] missing keys: {sorted(missing_p)}")
+
 
 
 
@@ -1018,7 +1025,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
       # Yearly summary (what you were printing before)
       dfy = dfy.round(0)
-      #print(dfy.to_csv(index=False))
+      print(dfy.to_csv(index=False))
 
 
     if display_month:
