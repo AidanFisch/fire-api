@@ -22,8 +22,9 @@ app.add_middleware(
 
 class FireRequest(BaseModel):
     inputs: Dict[str, Any] = Field(..., description="Full inputs dict from frontend")
-    property_list: List[Dict[str, Any]] = Field(..., description="List of property dicts from frontend")
+    property_list: List[Dict[str, Any]] = Field(default_factory=list)
     display_month: bool = True
+
 
 @app.get("/health")
 def health():
