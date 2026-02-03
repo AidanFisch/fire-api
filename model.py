@@ -1028,6 +1028,13 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     else:
         out = dfy
         mode = "yearly"
+    
+    import numpy as np
+    import pandas as pd
+
+  
+    out = out.replace([np.inf, -np.inf], np.nan)
+    out = out.where(pd.notnull(out), None)  # NaN -> None (JSON null)
 
     return {
         "mode": mode,
