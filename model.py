@@ -13,7 +13,7 @@ inputs_default = {
     "current_income": 200000,
     "current_expenses": 64000,
     "average_salary_increase": 0.035,
-    "end_age": 60,
+    "end_age": 80,
     "stock_growth": 0.06,
     "stock_yearly_contribution": 20000,
     "starting_stock_value": 35000,
@@ -389,10 +389,12 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Fire_Gap_Monthly"] = 0.0
 
     dfm["Salary_Paid"] = 0.0
-    
+
     dfm["Stock_Contrib_Paid"] = 0.0
     dfm["Expenses_Paid"] = 0.0
-    
+    dfm["Passive_Income_Monthly"] = 0.0
+    dfm["Withdrawals_Monthly"] = 0.0
+
 
 
     fired = False
@@ -420,11 +422,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         expenses_m = row["Expenses_Monthly"]
 
         stock_contrib_m = 0.0 if fired else stock_contrib
-        
+
 
 
         dfm.loc[i, "Salary_Paid"] = salary_m
-        
+
 
         dfm.loc[i, "Stock_Contrib_Paid"] = stock_contrib
 
@@ -489,7 +491,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                     eligible_balances[prefix] = bal
 
         offset_allocations = allocate_weighted_offset(available_offset_cash, eligible_balances)
-        
+
         dfm.loc[i, "Offset_Eligible_Balance_Total"] = sum(eligible_balances.values())
         dfm.loc[i, "Offset_Allocated_Total"] = sum(offset_allocations.values())
         dfm.loc[i, "Offset_Unused_Cash"] = max(available_offset_cash - dfm.loc[i, "Offset_Allocated_Total"], 0.0)
@@ -503,7 +505,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         # offset_allocations = {p["name"].replace(" ", "_"): 0.0 for p in property_list}
 
-        
+
 
 
         # ---- Property monthly mechanics
@@ -521,7 +523,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 dfm.loc[i, f"{prefix}_Mortgage_Balance"] = 0.0
                 continue
 
-            dfm.loc[i, f"{prefix}_Active"] = 1 
+            dfm.loc[i, f"{prefix}_Active"] = 1
             loan_bal = prop_state[prefix]["loan_balance"]
 
             dfm.loc[i, f"{prefix}_Mortgage_Balance_Start"] = loan_bal
@@ -646,7 +648,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
 
             # Write row outputs
-            
+
             dfm.loc[i, f"{prefix}_Mortgage_Balance"] = loan_bal_end
             dfm.loc[i, f"{prefix}_Monthly_Mortgage_PMT"] = actual_pmt_m
             dfm.loc[i, f"{prefix}_Mortgage_Interest"] = interest_m
@@ -698,7 +700,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         fire_annual_tax = tax_payable(max(taxable_fire_income_m * 12.0, 0.0))  # optional floor at 0 for the tax function
         fire_tax_m = fire_annual_tax / 12.0
 
-        
+
 
 
 
@@ -723,8 +725,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         dfm.loc[i, "Fire_Replacement_Cashflow_Monthly"] = fire_replacement_cashflow_m
         dfm.loc[i, "Fire_Principal_Service_Monthly"] = principal_service_m
-        dfm.loc[i, "Fire_Target_Monthly"] = target_m 
+        dfm.loc[i, "Fire_Target_Monthly"] = target_m
         dfm.loc[i, "Fire_Gap_Monthly"] = fire_gap_m
+        
 
         eligible_now = fire_gap_m >= 0
 
@@ -736,20 +739,24 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         dfm.loc[i, "FIRE_Age"] = fire_age if fire_age is not None else np.nan
 
         # =========================
-        # ACTUAL ASSET WITHDRAWALS (POST-FIRE ONLY)
+        # ACTUAL ASSET WITHDRAWALS (POST-FIRE ONLY) — OPTION 1
+        # Always withdraw full SWR amount after FIRE; super only after access age.
         # =========================
 
         stock_withdraw_m = 0.0
         super_withdraw_m = 0.0
 
+        dfm.loc[i, "Withdrawals_Monthly"] = stock_withdraw_m + super_withdraw_m
+        dfm.loc[i, "Passive_Income_Monthly"] = total_net_rent + stock_withdraw_m + super_withdraw_m
+
         if fired:
-            stock_withdraw_m = stock_draw_m
+            # Withdraw full SWR amount (Option 1), capped by remaining balance
+            stock_withdraw_m = min(stock_draw_m, stock_balance)
             stock_balance -= stock_withdraw_m
 
             if row["Age"] >= inputs["super_access_age"]:
-                super_withdraw_m = super_draw_m
+                super_withdraw_m = min(super_draw_m, super_balance)
                 super_balance -= super_withdraw_m
-
 
         total_prop_value = 0.0
         total_mort_bal = 0.0
@@ -835,14 +842,15 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         cash_balance = (
             cash_balance
             + salary_m
+            + total_net_rent
+            + stock_withdraw_m
+            + super_withdraw_m
             - expenses_m
             - stock_contrib_m
             - super_extra_m
-            + total_net_rent
             - total_owner_costs
             - total_principal
             - tax_paid_this_month
-            
         )
 
                 # =========================
@@ -885,7 +893,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           + (total_prop_value - ppor_value)
           - (total_mort_bal - ppor_mort)
 )
-        
+
         dfm.loc[i, "Net_Worth_Incl_Super_Incl_PPOR"] = cash_balance + stock_balance + super_balance + total_prop_value - total_mort_bal
         dfm.loc[i, "Net_Worth_Incl_Super_Ex_PPOR"] = (
           cash_balance
@@ -932,7 +940,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Stock_Contribution_Annual": "last",
           "Stock_Contribution_Monthly": "last",
           "Salary_Paid": "sum",
-          
+
           "Expenses_Paid": "sum",             # ✅ total paid
           "Stock_Contrib_Paid": "sum",        # ✅ total invested
           "Stock_Growth_Accrued": "sum",
@@ -1016,7 +1024,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
       })
 
-      
+
 
       # =========================
       # OUTPUT
@@ -1036,7 +1044,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     else:
         out = dfy
         mode = "yearly"
-    
+
     rows = out.to_dict(orient="records")
 
     result = {
