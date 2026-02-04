@@ -394,6 +394,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Expenses_Paid"] = 0.0
     dfm["Passive_Income_Monthly"] = 0.0
     dfm["Withdrawals_Monthly"] = 0.0
+    dfm["Salary_Annual_Effective"] = 0.0
+    dfm["Salary_Monthly_Effective"] = 0.0
 
 
 
@@ -418,6 +420,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         # ---- Income/expenses (monthly)
         salary_m_raw = row["Salary_Monthly"]
         salary_m = salary_m_raw if not fired else 0.0
+
+        
+        dfm.loc[i, "Salary_Monthly_Effective"] = salary_m
+        dfm.loc[i, "Salary_Annual_Effective"]  = salary_m * 12.0
+
 
         expenses_m = row["Expenses_Monthly"]
 
@@ -746,9 +753,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         stock_withdraw_m = 0.0
         super_withdraw_m = 0.0
 
-        dfm.loc[i, "Withdrawals_Monthly"] = stock_withdraw_m + super_withdraw_m
-        dfm.loc[i, "Passive_Income_Monthly"] = total_net_rent + stock_withdraw_m + super_withdraw_m
-
+        
         if fired:
             # Withdraw full SWR amount (Option 1), capped by remaining balance
             stock_withdraw_m = min(stock_draw_m, stock_balance)
@@ -757,6 +762,10 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             if row["Age"] >= inputs["super_access_age"]:
                 super_withdraw_m = min(super_draw_m, super_balance)
                 super_balance -= super_withdraw_m
+        
+        dfm.loc[i, "Withdrawals_Monthly"] = stock_withdraw_m + super_withdraw_m
+        dfm.loc[i, "Passive_Income_Monthly"] = total_net_rent + stock_withdraw_m + super_withdraw_m
+
 
         total_prop_value = 0.0
         total_mort_bal = 0.0
@@ -999,7 +1008,10 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
               "Net_Worth_Incl_PPOR": "last",
               "Net_Worth_Ex_PPOR": "last",
               "Target_Annual_Infl_Adj": "last",
-              "Target_Monthly_Infl_Adj": "last",
+              "Target_Monthly_Infl_Adj": "last",             
+              "Salary_Annual_Effective": "last",   # run-rate at end of year (will be 0 post FIRE)
+              "Salary_Monthly_Effective": "last",
+
           })
 
       dfy = dfm.groupby("Year", as_index=False).agg(agg)
@@ -1020,7 +1032,12 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Stock_Contrib_Paid": "Stock_Contrib_Total",
           "Super_Balance_End": "Super_Balance",
           "Super_SG_Contribution": "Super_SG_Total",
-          "Super_Extra_Contribution": "Super_Extra_Total",
+          "Super_Extra_Contribution": "Super_Extra_Total",        
+          "Salary_Annual": "Salary_Annual_RunRate",
+          "Salary_Monthly": "Salary_Monthly_RunRate",
+          "Salary_Annual_Effective": "Salary_Annual",
+          "Salary_Monthly_Effective": "Salary_Monthly",
+
 
       })
 
