@@ -13,7 +13,7 @@ inputs_default = {
     "current_income": 200000,
     "current_expenses": 64000,
     "average_salary_increase": 0.035,
-    "end_age": 80,
+    "end_age": 60,
     "stock_growth": 0.06,
     "stock_yearly_contribution": 20000,
     "starting_stock_value": 35000,
@@ -22,7 +22,7 @@ inputs_default = {
     "super_sg_rate": 0.11,                 # SG rate (11% from 2025)
     "super_growth": 0.065,                 # long-term return assumption
     "super_additional_annual": 0,          # voluntary extra, $/yr (affects cash)
-    "fire_swr": 0.04,          # 4% rule
+    "fire_swr": 0.08,          # 4% rule
     "super_access_age": 60,    # when super can be drawn
 }
 
@@ -392,10 +392,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
     dfm["Stock_Contrib_Paid"] = 0.0
     dfm["Expenses_Paid"] = 0.0
-    dfm["Passive_Income_Monthly"] = 0.0
+    # ---- NEW: explicit withdrawals + passive income (monthly)
+    dfm["Stock_Withdraw_Paid"] = 0.0
+    dfm["Super_Withdraw_Paid"] = 0.0
     dfm["Withdrawals_Monthly"] = 0.0
-    dfm["Salary_Annual_Effective"] = 0.0
-    dfm["Salary_Monthly_Effective"] = 0.0
+    dfm["Passive_Income_Monthly"] = 0.0
 
 
 
@@ -420,11 +421,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         # ---- Income/expenses (monthly)
         salary_m_raw = row["Salary_Monthly"]
         salary_m = salary_m_raw if not fired else 0.0
-
-        
-        dfm.loc[i, "Salary_Monthly_Effective"] = salary_m
-        dfm.loc[i, "Salary_Annual_Effective"]  = salary_m * 12.0
-
 
         expenses_m = row["Expenses_Monthly"]
 
@@ -734,7 +730,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         dfm.loc[i, "Fire_Principal_Service_Monthly"] = principal_service_m
         dfm.loc[i, "Fire_Target_Monthly"] = target_m
         dfm.loc[i, "Fire_Gap_Monthly"] = fire_gap_m
-        
 
         eligible_now = fire_gap_m >= 0
 
@@ -746,25 +741,26 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         dfm.loc[i, "FIRE_Age"] = fire_age if fire_age is not None else np.nan
 
         # =========================
-        # ACTUAL ASSET WITHDRAWALS (POST-FIRE ONLY) — OPTION 1
-        # Always withdraw full SWR amount after FIRE; super only after access age.
+        # ACTUAL ASSET WITHDRAWALS (POST-FIRE ONLY)
         # =========================
 
         stock_withdraw_m = 0.0
         super_withdraw_m = 0.0
 
-        
         if fired:
-            # Withdraw full SWR amount (Option 1), capped by remaining balance
-            stock_withdraw_m = min(stock_draw_m, stock_balance)
+            stock_withdraw_m = stock_draw_m
             stock_balance -= stock_withdraw_m
 
             if row["Age"] >= inputs["super_access_age"]:
-                super_withdraw_m = min(super_draw_m, super_balance)
+                super_withdraw_m = super_draw_m
                 super_balance -= super_withdraw_m
         
+        
+        dfm.loc[i, "Stock_Withdraw_Paid"] = stock_withdraw_m
+        dfm.loc[i, "Super_Withdraw_Paid"] = super_withdraw_m
         dfm.loc[i, "Withdrawals_Monthly"] = stock_withdraw_m + super_withdraw_m
         dfm.loc[i, "Passive_Income_Monthly"] = total_net_rent + stock_withdraw_m + super_withdraw_m
+
 
 
         total_prop_value = 0.0
@@ -848,6 +844,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         # Cashflow rule:
         # cash += salary - expenses - stock_contrib + net_rent - principal - tax + purchase_cashflow
         # (interest is already subtracted inside net_rent, so we do NOT subtract interest again)
+
         cash_balance = (
             cash_balance
             + salary_m
@@ -861,6 +858,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             - total_principal
             - tax_paid_this_month
         )
+
 
                 # =========================
 
@@ -980,6 +978,12 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Fire_Gap_Monthly": "last",
           "FIRE_Eligible": "last",
           "FIRE_Age": "last",
+          
+          "Stock_Withdraw_Paid": "sum",
+          "Super_Withdraw_Paid": "sum",
+          "Withdrawals_Monthly": "sum",
+          "Passive_Income_Monthly": "sum",
+
 
       }
 
@@ -1008,10 +1012,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
               "Net_Worth_Incl_PPOR": "last",
               "Net_Worth_Ex_PPOR": "last",
               "Target_Annual_Infl_Adj": "last",
-              "Target_Monthly_Infl_Adj": "last",             
-              "Salary_Annual_Effective": "last",   # run-rate at end of year (will be 0 post FIRE)
-              "Salary_Monthly_Effective": "last",
-
+              "Target_Monthly_Infl_Adj": "last",
           })
 
       dfy = dfm.groupby("Year", as_index=False).agg(agg)
@@ -1032,12 +1033,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Stock_Contrib_Paid": "Stock_Contrib_Total",
           "Super_Balance_End": "Super_Balance",
           "Super_SG_Contribution": "Super_SG_Total",
-          "Super_Extra_Contribution": "Super_Extra_Total",        
-          "Salary_Annual": "Salary_Annual_RunRate",
-          "Salary_Monthly": "Salary_Monthly_RunRate",
-          "Salary_Annual_Effective": "Salary_Annual",
-          "Salary_Monthly_Effective": "Salary_Monthly",
-
+          "Super_Extra_Contribution": "Super_Extra_Total",
+          "Stock_Withdraw_Paid": "Stock_Withdraw_Total",
+          "Super_Withdraw_Paid": "Super_Withdraw_Total",
+          "Withdrawals_Monthly": "Withdrawals_Total",
+          "Passive_Income_Monthly": "Passive_Income_Total",
 
       })
 
