@@ -22,7 +22,8 @@ inputs_default = {
     "super_sg_rate": 0.11,                 # SG rate (11% from 2025)
     "super_growth": 0.065,                 # long-term return assumption
     "super_additional_annual": 0,          # voluntary extra, $/yr (affects cash)
-    "fire_swr": 0.08,          # 4% rule
+    "stock_swr": 0.08,         # NEW: stock drawdown rate (annual)
+    "super_swr": 0.08,         # NEW: super drawdown rate (annual)
     "super_access_age": 60,    # when super can be drawn
 }
 
@@ -686,11 +687,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
 
         # Allowed deterministic drawdowns (DO NOT mutate balances here)
-        stock_draw_m = (stock_balance * inputs["fire_swr"]) / 12.0
+        stock_draw_m = (stock_balance * inputs["stock_swr"]) / 12.0
 
         super_draw_m = 0.0
         if row["Age"] >= inputs["super_access_age"]:
-            super_draw_m = (super_balance * inputs["fire_swr"]) / 12.0
+            super_draw_m = (super_balance * inputs["super_swr"]) / 12.0
 
         # Mortgage principal MUST be serviceable post-FIRE
         principal_service_m = total_principal
@@ -748,7 +749,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         super_withdraw_m = 0.0
 
         if fired:
-            stock_withdraw_m = stock_draw_m
+            stock_withdraw_m = min(stock_draw_m, stock_balance)
             stock_balance -= stock_withdraw_m
 
             if row["Age"] >= inputs["super_access_age"]:
