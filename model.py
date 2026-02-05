@@ -1014,9 +1014,12 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Withdrawals_Monthly": "sum",
           "Passive_Income_Monthly": "sum",
           "Cash_Drawdown_Paid": "sum",
+          "Cash_Drawdown_Monthly_Last": "last",
 
 
       }
+
+      
 
       for p in property_list:
           prefix = p["name"].replace(" ", "_")
@@ -1046,6 +1049,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
               "Target_Monthly_Infl_Adj": "last",
           })
 
+      dfm["Cash_Drawdown_Monthly_Last"] = dfm["Cash_Drawdown_Paid"]
+
       dfy = dfm.groupby("Year", as_index=False).agg(agg)
 
       # Optional: your original "target income" (inflation-adjusted) yearly
@@ -1070,6 +1075,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Withdrawals_Monthly": "Withdrawals_Total",
           "Passive_Income_Monthly": "Passive_Income_Total",
           "Cash_Drawdown_Paid": "Cash_Drawdown_Total",
+          "Cash_Drawdown_Monthly_Last": "Cash_Drawdown_Monthly",
 
       })
 
