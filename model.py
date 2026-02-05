@@ -23,7 +23,7 @@ inputs_default = {
     "super_growth": 0.065,                 # long-term return assumption
     "super_additional_annual": 0,          # voluntary extra, $/yr (affects cash)
     "stock_swr": 0.08,         # NEW: stock drawdown rate (annual)
-    "super_swr": 0.08,         # NEW: super drawdown rate (annual)
+    "super_swr": 0.04,         # NEW: super drawdown rate (annual)
     "super_access_age": 60,    # when super can be drawn
 }
 
@@ -318,6 +318,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 remaining_months=remaining
             )
 
+
+    
+
+
+
     # =========================
     # SIMULATION LOOP (MONTHLY)
     # =========================
@@ -398,6 +403,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Super_Withdraw_Paid"] = 0.0
     dfm["Withdrawals_Monthly"] = 0.0
     dfm["Passive_Income_Monthly"] = 0.0
+    dfm["Cash_Drawdown_Paid"] = 0.0   # how much cash is used this month to cover deficit (bridge)
 
 
 
@@ -424,6 +430,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         salary_m = salary_m_raw if not fired else 0.0
 
         expenses_m = row["Expenses_Monthly"]
+
+        target_m = row["Target_Monthly_Infl_Adj"]
+        
 
         stock_contrib_m = 0.0 if fired else stock_contrib
 
@@ -692,6 +701,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         super_draw_m = 0.0
         if row["Age"] >= inputs["super_access_age"]:
             super_draw_m = (super_balance * inputs["super_swr"]) / 12.0
+            
 
         # Mortgage principal MUST be serviceable post-FIRE
         principal_service_m = total_principal
@@ -742,6 +752,21 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         dfm.loc[i, "FIRE_Age"] = fire_age if fire_age is not None else np.nan
 
         # =========================
+        # CASH DRAWDOWN (REPORTING ONLY)
+        # Only after FIRE is achieved, and only until super access age.
+        # This does NOT change cash_balance.
+        # =========================
+        cash_draw_m = 0.0
+        if fired and (row["Age"] < inputs["super_access_age"]):
+            # fire_gap_m = fire_replacement_cashflow_m - target_m
+            # so required cash to meet target is the negative gap
+            cash_draw_m = max(-fire_gap_m, 0.0)
+
+        dfm.loc[i, "Cash_Drawdown_Paid"] = cash_draw_m
+
+
+
+        # =========================
         # ACTUAL ASSET WITHDRAWALS (POST-FIRE ONLY)
         # =========================
 
@@ -755,12 +780,15 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             if row["Age"] >= inputs["super_access_age"]:
                 super_withdraw_m = super_draw_m
                 super_balance -= super_withdraw_m
+                
         
         
         dfm.loc[i, "Stock_Withdraw_Paid"] = stock_withdraw_m
         dfm.loc[i, "Super_Withdraw_Paid"] = super_withdraw_m
         dfm.loc[i, "Withdrawals_Monthly"] = stock_withdraw_m + super_withdraw_m
         dfm.loc[i, "Passive_Income_Monthly"] = total_net_rent + stock_withdraw_m + super_withdraw_m
+        
+
 
 
 
@@ -838,7 +866,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         # ---- Taxable income accrues monthly (salary + net rent). Tax paid once at December.
 
-
+        
 
 
         # ---- Cash balance update (THIS is your offset pool)
@@ -984,6 +1012,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Super_Withdraw_Paid": "sum",
           "Withdrawals_Monthly": "sum",
           "Passive_Income_Monthly": "sum",
+          "Cash_Drawdown_Paid": "sum",
 
 
       }
@@ -1039,6 +1068,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Super_Withdraw_Paid": "Super_Withdraw_Total",
           "Withdrawals_Monthly": "Withdrawals_Total",
           "Passive_Income_Monthly": "Passive_Income_Total",
+          "Cash_Drawdown_Paid": "Cash_Drawdown_Total",
 
       })
 
