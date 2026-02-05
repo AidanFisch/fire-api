@@ -756,11 +756,12 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         # Only after FIRE is achieved, and only until super access age.
         # This does NOT change cash_balance.
         # =========================
+        # Cash drawdown needed to "maintain" the FIRE target gap (reporting-only)
         cash_draw_m = 0.0
-        if fired and (row["Age"] < inputs["super_access_age"]):
-            # fire_gap_m = fire_replacement_cashflow_m - target_m
-            # so required cash to meet target is the negative gap
-            cash_draw_m = max(-fire_gap_m, 0.0)
+        if fired:
+            required_gap = max(-fire_gap_m, 0.0)          # how much extra cash is needed this month
+            available_cash = max(cash_balance, 0.0)       # can't draw negative cash
+            cash_draw_m = min(required_gap, available_cash)
 
         dfm.loc[i, "Cash_Drawdown_Paid"] = cash_draw_m
 
