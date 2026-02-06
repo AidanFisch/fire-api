@@ -205,7 +205,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Expenses_Monthly"] = dfm["Expenses_Annual"] / 12.0
 
     dfm["Target_Annual_Infl_Adj"] = inputs["todays_lifestyle_income"] * ((1 + inputs["inflation"]) ** dfm["t_years"])
-    dfm["Target_Monthly_Infl_Adj"] = dfm["Target_Annual_Infl_Adj"] / 12.0
+    
 
 
     # Stocks monthly
@@ -431,7 +431,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         expenses_m = row["Expenses_Monthly"]
 
-        target_m = row["Target_Monthly_Infl_Adj"]
+        target_m = row["Target_Annual_Infl_Adj"] / 12.0
+
         
 
         stock_contrib_m = 0.0 if fired else stock_contrib
@@ -728,7 +729,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         )
 
-        target_m = row["Target_Monthly_Infl_Adj"]
+        target_m = row["Target_Annual_Infl_Adj"] / 12.0
+
 
         fire_gap_m = fire_replacement_cashflow_m - target_m
 
@@ -1000,7 +1002,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Net_Worth_Incl_PPOR": "last",
           "Net_Worth_Ex_PPOR": "last",
           "Target_Annual_Infl_Adj": "last",
-          "Target_Monthly_Infl_Adj": "last",
           "Stock_Drawdown_Monthly": "last",
           "Super_Drawdown_Monthly": "last",
           "FIRE_Income_Monthly": "last",
@@ -1046,7 +1047,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
               "Net_Worth_Incl_PPOR": "last",
               "Net_Worth_Ex_PPOR": "last",
               "Target_Annual_Infl_Adj": "last",
-              "Target_Monthly_Infl_Adj": "last",
           })
 
       dfm["Cash_Drawdown_Monthly_Last"] = dfm["Cash_Drawdown_Paid"]
