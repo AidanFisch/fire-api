@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
+import time
 
 from model import run_fire_model  # <-- your big function lives in model.py
 
@@ -38,13 +39,21 @@ def health():
 
 @app.post("/fire")
 def fire_calc(req: FireRequest):
+    t0 = time.perf_counter()
     try:
+        t1 = time.perf_counter()
         result = run_fire_model(
             inputs=req.inputs,
             property_list=req.property_list,
             display_month=req.display_month
         )
+        t2 = time.perf_counter()
+
+        # Log timings to Render logs
+        print(f"[timing] /fire parse={(t1-t0)*1000:.1f}ms | model={(t2-t1)*1000:.1f}ms | total={(t2-t0)*1000:.1f}ms", flush=True)
+
         return result
     except Exception as e:
-        # bubble up a clean error for debugging frontend
+        print(f"[error] /fire {e}", flush=True)
         raise HTTPException(status_code=400, detail=str(e))
+
