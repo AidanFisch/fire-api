@@ -406,107 +406,32 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Cash_Drawdown_Paid"] = 0.0   # how much cash is used this month to cover deficit (bridge)
 
 
-        # =========================
-    # SPEED FIX #1 (arrays): cache reads + preallocate writes
-    # =========================
-    n = len(dfm)
-
-    # Fast read arrays (things you read each month)
-    dates = dfm["Date"].to_numpy()
-    years_arr = dfm["Year"].to_numpy(dtype=np.int32)
-    months_arr = dfm["Month"].to_numpy(dtype=np.int8)
-
-    salary_monthly_arr = dfm["Salary_Monthly"].to_numpy(dtype=float)
-    expenses_monthly_arr = dfm["Expenses_Monthly"].to_numpy(dtype=float)
-    target_monthly_arr = (dfm["Target_Annual_Infl_Adj"].to_numpy(dtype=float) / 12.0)
-
-    stock_contrib_monthly_arr = dfm["Stock_Contribution_Monthly"].to_numpy(dtype=float)
-    super_extra_monthly_arr = dfm["Super_Extra_Monthly"].to_numpy(dtype=float)
-    age_arr = dfm["Age"].to_numpy(dtype=float)
-
-    # Fast write arrays (global outputs you currently set with dfm.loc inside the loop)
-    out_stock_growth = np.zeros(n, dtype=float)
-    out_stock_end = np.zeros(n, dtype=float)
-
-    out_super_growth = np.zeros(n, dtype=float)
-    out_super_sg = np.zeros(n, dtype=float)
-    out_super_extra = np.zeros(n, dtype=float)
-    out_super_end = np.zeros(n, dtype=float)
-
-    out_total_net_rent = np.zeros(n, dtype=float)
-    out_tax_paid = np.zeros(n, dtype=float)
-    out_cash_end = np.zeros(n, dtype=float)
-
-    out_stock_draw = np.zeros(n, dtype=float)
-    out_super_draw = np.zeros(n, dtype=float)
-    out_fire_income = np.zeros(n, dtype=float)
-
-    out_fire_replacement = np.zeros(n, dtype=float)
-    out_fire_principal_service = np.zeros(n, dtype=float)
-    out_fire_target = np.zeros(n, dtype=float)
-    out_fire_gap = np.zeros(n, dtype=float)
-
-    out_fire_eligible = np.zeros(n, dtype=np.int8)
-    out_fire_age = np.full(n, np.nan, dtype=float)
-
-    out_salary_paid = np.zeros(n, dtype=float)
-    out_stock_contrib_paid = np.zeros(n, dtype=float)
-
-    out_stock_withdraw = np.zeros(n, dtype=float)
-    out_super_withdraw = np.zeros(n, dtype=float)
-    out_withdrawals = np.zeros(n, dtype=float)
-    out_passive_income = np.zeros(n, dtype=float)
-    out_cash_drawdown_paid = np.zeros(n, dtype=float)
-
-    out_total_prop_value = np.zeros(n, dtype=float)
-    out_total_mort_bal = np.zeros(n, dtype=float)
-
-    out_net_worth_incl_ppor = np.zeros(n, dtype=float)
-    out_net_worth_ex_ppor = np.zeros(n, dtype=float)
-    out_net_worth_incl_super_incl_ppor = np.zeros(n, dtype=float)
-    out_net_worth_incl_super_ex_ppor = np.zeros(n, dtype=float)
-
-    out_total_prop_equity = np.zeros(n, dtype=float)
-    out_total_prop_value_ex_ppor = np.zeros(n, dtype=float)
-    out_total_mort_bal_ex_ppor = np.zeros(n, dtype=float)
-    out_total_prop_equity_ex_ppor = np.zeros(n, dtype=float)
-
-    out_offset_eligible_total = np.zeros(n, dtype=float)
-    out_offset_alloc_total = np.zeros(n, dtype=float)
-    out_offset_unused_cash = np.zeros(n, dtype=float)
-
 
     fired = False
     fire_age = None
 
-    age_arr = dfm["Age"].to_numpy(dtype=float)
-
-    for i in range(n):
-        dt = dates[i]
-        year = int(years_arr[i])
-        month = int(months_arr[i])
-        age_now = float(age_arr[i])
+    for i, row in dfm.iterrows():
+        dt = row["Date"]
+        year = int(row["Year"])
+        month = int(row["Month"])
 
 
         # ---- Stock update (monthly)
         stock_growth_amt = stock_balance * stock_m_growth
-        
-        stock_contrib = 0.0 if fired else stock_contrib_monthly_arr[i]
-
+        stock_contrib = 0.0 if fired else row["Stock_Contribution_Monthly"]
         stock_balance += stock_growth_amt + stock_contrib
 
 
-        out_stock_growth[i] = stock_growth_amt
-        out_stock_end[i] = stock_balance
-
+        dfm.loc[i, "Stock_Growth_Accrued"] = stock_growth_amt
+        dfm.loc[i, "Stock_Balance_End"] = stock_balance
 
         # ---- Income/expenses (monthly)
-
-        salary_m_raw = salary_monthly_arr[i]
+        salary_m_raw = row["Salary_Monthly"]
         salary_m = salary_m_raw if not fired else 0.0
 
-        expenses_m = expenses_monthly_arr[i]
-        target_m = target_monthly_arr[i]
+        expenses_m = row["Expenses_Monthly"]
+
+        target_m = row["Target_Annual_Infl_Adj"] / 12.0
 
         
 
@@ -514,23 +439,25 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
 
 
-        out_salary_paid[i] = salary_m
-        out_stock_contrib_paid[i] = stock_contrib
+        dfm.loc[i, "Salary_Paid"] = salary_m
+
+
+        dfm.loc[i, "Stock_Contrib_Paid"] = stock_contrib
 
 
         # ---- Super update (monthly)
         # ---- Super update (monthly)
         super_sg_m = 0.0 if fired else (salary_m * float(inputs.get("super_sg_rate", 0.0)))  # ✅ SG stops too
-        super_extra_m = float(super_extra_monthly_arr[i])
-                        
+        super_extra_m = float(row.get("Super_Extra_Monthly", 0.0))                            # voluntary still optional
+
 
         super_growth_amt = super_balance * super_m_growth
         super_balance += super_growth_amt + super_sg_m + super_extra_m
 
-        out_super_growth[i] = super_growth_amt
-        out_super_sg[i] = super_sg_m
-        out_super_extra[i] = super_extra_m
-        out_super_end[i] = super_balance
+        dfm.loc[i, "Super_Growth_Accrued"] = super_growth_amt
+        dfm.loc[i, "Super_SG_Contribution"] = super_sg_m
+        dfm.loc[i, "Super_Extra_Contribution"] = super_extra_m
+        dfm.loc[i, "Super_Balance_End"] = super_balance
 
 
         # ---- Activate purchases (if year_bought == this month)
@@ -579,13 +506,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         offset_allocations = allocate_weighted_offset(available_offset_cash, eligible_balances)
 
-        eligible_total = float(sum(eligible_balances.values()))
-        alloc_total = float(sum(offset_allocations.values()))
-
-        out_offset_eligible_total[i] = eligible_total
-        out_offset_alloc_total[i] = alloc_total
-        out_offset_unused_cash[i] = max(available_offset_cash - alloc_total, 0.0)
-
+        dfm.loc[i, "Offset_Eligible_Balance_Total"] = sum(eligible_balances.values())
+        dfm.loc[i, "Offset_Allocated_Total"] = sum(offset_allocations.values())
+        dfm.loc[i, "Offset_Unused_Cash"] = max(available_offset_cash - dfm.loc[i, "Offset_Allocated_Total"], 0.0)
 
 
 
@@ -764,7 +687,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             total_pmt += actual_pmt_m
             total_running_costs += (strata_m + rates_m + other_m)
 
-        out_total_net_rent[i] = total_net_rent
+        dfm.loc[i, "Total_Net_Rent"] = total_net_rent
 
 
         # =========================
@@ -777,8 +700,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         stock_draw_m = (stock_balance * inputs["stock_swr"]) / 12.0
 
         super_draw_m = 0.0
-        if age_now >= inputs["super_access_age"]:
-
+        if row["Age"] >= inputs["super_access_age"]:
             super_draw_m = (super_balance * inputs["super_swr"]) / 12.0
             
 
@@ -807,31 +729,29 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         )
 
-        target_m = target_monthly_arr[i]
-
+        target_m = row["Target_Annual_Infl_Adj"] / 12.0
 
 
         fire_gap_m = fire_replacement_cashflow_m - target_m
 
-        out_stock_draw[i] = stock_draw_m
-        out_super_draw[i] = super_draw_m
-        out_fire_income[i] = fire_replacement_cashflow_m
+        dfm.loc[i, "Stock_Drawdown_Monthly"] = stock_draw_m
+        dfm.loc[i, "Super_Drawdown_Monthly"] = super_draw_m
+        dfm.loc[i, "FIRE_Income_Monthly"] = fire_replacement_cashflow_m
 
-        out_fire_replacement[i] = fire_replacement_cashflow_m
-        out_fire_principal_service[i] = principal_service_m
-        out_fire_target[i] = target_m
-        out_fire_gap[i] = fire_gap_m
+
+        dfm.loc[i, "Fire_Replacement_Cashflow_Monthly"] = fire_replacement_cashflow_m
+        dfm.loc[i, "Fire_Principal_Service_Monthly"] = principal_service_m
+        dfm.loc[i, "Fire_Target_Monthly"] = target_m
+        dfm.loc[i, "Fire_Gap_Monthly"] = fire_gap_m
 
         eligible_now = fire_gap_m >= 0
 
         if (not fired) and eligible_now:
             fired = True
-            fire_age = float(age_arr[i])
+            fire_age = float(row["Age"])
 
-
-        out_fire_eligible[i] = 1 if fired else 0
-        out_fire_age[i] = fire_age if fire_age is not None else np.nan
-
+        dfm.loc[i, "FIRE_Eligible"] = 1 if fired else 0
+        dfm.loc[i, "FIRE_Age"] = fire_age if fire_age is not None else np.nan
 
         # =========================
         # CASH DRAWDOWN (REPORTING ONLY)
@@ -845,8 +765,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             available_cash = max(cash_balance, 0.0)       # can't draw negative cash
             cash_draw_m = min(required_gap, available_cash)
 
-        out_cash_drawdown_paid[i] = cash_draw_m
-
+        dfm.loc[i, "Cash_Drawdown_Paid"] = cash_draw_m
 
 
 
@@ -861,17 +780,16 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             stock_withdraw_m = min(stock_draw_m, stock_balance)
             stock_balance -= stock_withdraw_m
 
-            if age_now >= inputs["super_access_age"]:
+            if row["Age"] >= inputs["super_access_age"]:
                 super_withdraw_m = super_draw_m
                 super_balance -= super_withdraw_m
                 
         
         
-        out_stock_withdraw[i] = stock_withdraw_m
-        out_super_withdraw[i] = super_withdraw_m
-        out_withdrawals[i] = stock_withdraw_m + super_withdraw_m
-        out_passive_income[i] = total_net_rent + stock_withdraw_m + super_withdraw_m
-
+        dfm.loc[i, "Stock_Withdraw_Paid"] = stock_withdraw_m
+        dfm.loc[i, "Super_Withdraw_Paid"] = super_withdraw_m
+        dfm.loc[i, "Withdrawals_Monthly"] = stock_withdraw_m + super_withdraw_m
+        dfm.loc[i, "Passive_Income_Monthly"] = total_net_rent + stock_withdraw_m + super_withdraw_m
         
 
 
@@ -898,15 +816,18 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 ppor_mort += b
 
         # ✅ Write totals
-        out_total_prop_value[i] = total_prop_value
-        out_total_mort_bal[i] = total_mort_bal
+        dfm.loc[i, "Total_Property_Value"] = total_prop_value
+        dfm.loc[i, "Total_Mortgage_Balance"] = total_mort_bal
 
-        out_total_prop_equity[i] = max(total_prop_value - total_mort_bal, 0.0)
+        # ✅ Add these totals (equity + ex-PPOR breakdown)
+        dfm.loc[i, "Total_Property_Equity"] = max(total_prop_value - total_mort_bal, 0.0)
 
-        out_total_prop_value_ex_ppor[i] = max(total_prop_value - ppor_value, 0.0)
-        out_total_mort_bal_ex_ppor[i] = max(total_mort_bal - ppor_mort, 0.0)
-        out_total_prop_equity_ex_ppor[i] = max(out_total_prop_value_ex_ppor[i] - out_total_mort_bal_ex_ppor[i], 0.0)
-
+        dfm.loc[i, "Total_Property_Value_Ex_PPOR"] = max(total_prop_value - ppor_value, 0.0)
+        dfm.loc[i, "Total_Mortgage_Balance_Ex_PPOR"] = max(total_mort_bal - ppor_mort, 0.0)
+        dfm.loc[i, "Total_Property_Equity_Ex_PPOR"] = max(
+            dfm.loc[i, "Total_Property_Value_Ex_PPOR"] - dfm.loc[i, "Total_Mortgage_Balance_Ex_PPOR"],
+            0.0
+        )
 
 
         # ---- TAXABLE INCOME (allow negative gearing)
@@ -923,8 +844,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         estimated_annual_tax = tax_payable(annualised_taxable_income)
 
         tax_paid_this_month = estimated_annual_tax / 12.0
-        out_tax_paid[i] = tax_paid_this_month
-
+        dfm.loc[i, "Tax_Paid"] = tax_paid_this_month
 
 
 
@@ -1003,77 +923,25 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 # )
 
 
-        out_cash_end[i] = cash_balance
+        dfm.loc[i, "Cash_Balance_End"] = cash_balance
+                # ---- Net worth (end-of-month)
+        dfm.loc[i, "Net_Worth_Incl_PPOR"] = cash_balance + stock_balance + total_prop_value - total_mort_bal
+        dfm.loc[i, "Net_Worth_Ex_PPOR"] = (
+          cash_balance
+          + stock_balance
+          + (total_prop_value - ppor_value)
+          - (total_mort_bal - ppor_mort)
+)
 
-        out_net_worth_incl_ppor[i] = cash_balance + stock_balance + total_prop_value - total_mort_bal
-        out_net_worth_ex_ppor[i] = (
-            cash_balance
-            + stock_balance
-            + (total_prop_value - ppor_value)
-            - (total_mort_bal - ppor_mort)
-        )
+        dfm.loc[i, "Net_Worth_Incl_Super_Incl_PPOR"] = cash_balance + stock_balance + super_balance + total_prop_value - total_mort_bal
+        dfm.loc[i, "Net_Worth_Incl_Super_Ex_PPOR"] = (
+          cash_balance
+          + stock_balance
+          + super_balance
+          + (total_prop_value - ppor_value)
+          - (total_mort_bal - ppor_mort)
+)
 
-        out_net_worth_incl_super_incl_ppor[i] = cash_balance + stock_balance + super_balance + total_prop_value - total_mort_bal
-        out_net_worth_incl_super_ex_ppor[i] = (
-            cash_balance
-            + stock_balance
-            + super_balance
-            + (total_prop_value - ppor_value)
-            - (total_mort_bal - ppor_mort)
-        )
-
-    # =========================
-    # SPEED FIX #1 (arrays): write arrays back to dfm
-    # =========================
-    dfm["Stock_Growth_Accrued"] = out_stock_growth
-    dfm["Stock_Balance_End"] = out_stock_end
-
-    dfm["Super_Growth_Accrued"] = out_super_growth
-    dfm["Super_SG_Contribution"] = out_super_sg
-    dfm["Super_Extra_Contribution"] = out_super_extra
-    dfm["Super_Balance_End"] = out_super_end
-
-    dfm["Total_Net_Rent"] = out_total_net_rent
-    dfm["Tax_Paid"] = out_tax_paid
-    dfm["Cash_Balance_End"] = out_cash_end
-
-    dfm["Stock_Drawdown_Monthly"] = out_stock_draw
-    dfm["Super_Drawdown_Monthly"] = out_super_draw
-    dfm["FIRE_Income_Monthly"] = out_fire_income
-
-    dfm["Fire_Replacement_Cashflow_Monthly"] = out_fire_replacement
-    dfm["Fire_Principal_Service_Monthly"] = out_fire_principal_service
-    dfm["Fire_Target_Monthly"] = out_fire_target
-    dfm["Fire_Gap_Monthly"] = out_fire_gap
-
-    dfm["FIRE_Eligible"] = out_fire_eligible
-    dfm["FIRE_Age"] = out_fire_age
-
-    dfm["Salary_Paid"] = out_salary_paid
-    dfm["Stock_Contrib_Paid"] = out_stock_contrib_paid
-
-    dfm["Stock_Withdraw_Paid"] = out_stock_withdraw
-    dfm["Super_Withdraw_Paid"] = out_super_withdraw
-    dfm["Withdrawals_Monthly"] = out_withdrawals
-    dfm["Passive_Income_Monthly"] = out_passive_income
-    dfm["Cash_Drawdown_Paid"] = out_cash_drawdown_paid
-
-    dfm["Total_Property_Value"] = out_total_prop_value
-    dfm["Total_Mortgage_Balance"] = out_total_mort_bal
-
-    dfm["Net_Worth_Incl_PPOR"] = out_net_worth_incl_ppor
-    dfm["Net_Worth_Ex_PPOR"] = out_net_worth_ex_ppor
-    dfm["Net_Worth_Incl_Super_Incl_PPOR"] = out_net_worth_incl_super_incl_ppor
-    dfm["Net_Worth_Incl_Super_Ex_PPOR"] = out_net_worth_incl_super_ex_ppor
-
-    dfm["Total_Property_Equity"] = out_total_prop_equity
-    dfm["Total_Property_Value_Ex_PPOR"] = out_total_prop_value_ex_ppor
-    dfm["Total_Mortgage_Balance_Ex_PPOR"] = out_total_mort_bal_ex_ppor
-    dfm["Total_Property_Equity_Ex_PPOR"] = out_total_prop_equity_ex_ppor
-
-    dfm["Offset_Eligible_Balance_Total"] = out_offset_eligible_total
-    dfm["Offset_Allocated_Total"] = out_offset_alloc_total
-    dfm["Offset_Unused_Cash"] = out_offset_unused_cash
 
 
     ### toggle display
@@ -1232,7 +1100,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         out = dfy
         mode = "yearly"
 
-    out = out.replace({np.nan: None})
     rows = out.to_dict(orient="records")
 
     result = {
