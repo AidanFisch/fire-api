@@ -70,7 +70,7 @@ def fire_calc(req: FireRequest):
 
 
 
----------- NEW: Budget models & endpoints ----------
+# ---------- NEW: Budget models & endpoints ----------
 
 class ExpenseItem(BaseModel):
     category: str
