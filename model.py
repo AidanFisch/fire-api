@@ -180,6 +180,153 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         return (end_year - start_year) * 12
 
     # =========================
+    # CGT HELPERS
+    # =========================
+
+    def _parse_ym(ym: str):
+        """'YYYY-MM' → (year, month) ints."""
+        y, m = ym.split("-")
+        return int(y), int(m)
+
+    def _is_ppor(prop, yr, mo):
+        """Is this property the PPOR in the given year/month?"""
+        periods = prop.get("ppor_periods")
+        if not periods:
+            return bool(prop.get("is_owner_occupied", False))
+        for period in periods:
+            fy, fm = _parse_ym(period["from"])
+            if period.get("to"):
+                ty, tm = _parse_ym(period["to"])
+            else:
+                ty, tm = 9999, 12
+            after_start = (yr > fy) or (yr == fy and mo >= fm)
+            before_end  = (yr < ty) or (yr == ty and mo <= tm)
+            if after_start and before_end:
+                return True
+        return False
+
+    def _marginal_rate(income):
+        """Top marginal rate bracket (2025-26 schedule)."""
+        if income <= 18200:   return 0.0
+        elif income <= 45000: return 0.19
+        elif income <= 120000: return 0.325
+        elif income <= 180000: return 0.37
+        else: return 0.45
+
+    def _exempt_months(prop, buy_yr, sale_yr):
+        """Total CGT-exempt months = genuine PPOR + 6-year-rule window."""
+        p_abs = buy_yr * 12 + 1       # Jan of purchase year
+        s_abs = sale_yr * 12 + 12     # Dec of sale year
+        total  = s_abs - p_abs
+
+        periods = prop.get("ppor_periods")
+        if not periods:
+            return total if prop.get("is_owner_occupied", False) else 0
+
+        exempt = 0
+        for period in periods:
+            fy, fm = _parse_ym(period["from"])
+            f_abs  = fy * 12 + fm
+            if period.get("to"):
+                ty, tm = _parse_ym(period["to"])
+                t_abs  = ty * 12 + tm
+            else:
+                t_abs = s_abs
+
+            # Genuine PPOR months within ownership window
+            ps = max(f_abs, p_abs)
+            pe = min(t_abs, s_abs)
+            exempt += max(pe - ps, 0)
+
+            # 6-year absence rule (only when period has an explicit end date)
+            if period.get("six_year_rule") and period.get("to"):
+                absence_start = t_abs
+                # Find start of next PPOR period (caps the 6-year window early)
+                next_ppor = None
+                for other in periods:
+                    ofy, ofm = _parse_ym(other["from"])
+                    o_abs = ofy * 12 + ofm
+                    if o_abs > t_abs and (next_ppor is None or o_abs < next_ppor):
+                        next_ppor = o_abs
+                six_yr_end = absence_start + 72   # 72 months = 6 years
+                cap = min(six_yr_end,
+                          next_ppor if next_ppor else s_abs,
+                          s_abs)
+                exempt += max(cap - absence_start, 0)
+
+        return min(exempt, total)
+
+    def _calc_cgt(prop, sale_yr, sale_price_val, annual_income,
+                  cpi=0.025, no_30_min=False):
+        """
+        Return CGT tax payable on property sale.
+
+        Applies:
+          Bucket A (sell < Jul 2027):   50% discount + marginal rate
+          Bucket B (buy < 2027, sell >= 2027): split at Jul 2027
+          Bucket C (buy >= Jul 2027):   CPI indexation + 30% min tax
+        PPOR & 6-year-rule exemption applied before bucket calc.
+        """
+        CGT_REFORM = 2027
+        buy_yr   = int(prop.get("year_bought", sale_yr))
+        cost_base = float(prop.get("purchase_price", 0)) + float(prop.get("purchase_fees", 0))
+
+        total_gain = float(sale_price_val) - cost_base
+        if total_gain <= 0:
+            return 0.0
+
+        total_mo  = max((sale_yr - buy_yr) * 12, 1)
+        held_long = (total_mo >= 12)
+
+        exempt_mo   = _exempt_months(prop, buy_yr, sale_yr)
+        tax_frac    = max(1.0 - exempt_mo / total_mo, 0.0)
+        if tax_frac <= 0:
+            return 0.0
+
+        mr = _marginal_rate(float(annual_income))
+
+        # ---- Bucket A: sell before 1 Jul 2027 ----
+        if sale_yr < CGT_REFORM:
+            gain = total_gain * tax_frac
+            if held_long:
+                gain *= 0.5          # 50% CGT discount
+            return max(gain * mr, 0.0)
+
+        # ---- Bucket C: bought on/after 1 Jul 2027 ----
+        elif buy_yr >= CGT_REFORM:
+            yrs = total_mo / 12.0
+            indexed_cost = cost_base * ((1 + cpi) ** yrs)
+            real_gain    = max(float(sale_price_val) - indexed_cost, 0.0) * tax_frac
+            rate = mr if no_30_min else max(mr, 0.30)
+            return max(real_gain * rate, 0.0)
+
+        # ---- Bucket B: owned before 2027, sell after ----
+        else:
+            reform_abs = CGT_REFORM * 12 + 7   # July 2027
+            buy_abs    = buy_yr * 12 + 1        # Jan of buy year
+            sale_abs   = sale_yr * 12 + 12      # Dec of sale year
+
+            pre_mo  = max(reform_abs - buy_abs, 0)
+            post_mo = max(sale_abs - reform_abs, 0)
+            pre_f   = pre_mo / total_mo
+            post_f  = post_mo / total_mo
+
+            # Pre-2027: old 50% discount
+            pre_gain = total_gain * tax_frac * pre_f
+            if held_long:
+                pre_gain *= 0.5
+            pre_tax = pre_gain * mr
+
+            # Post-2027: CPI indexation on post period cost base
+            post_sale_val  = float(sale_price_val) * tax_frac * post_f
+            post_cost_base = cost_base * tax_frac * post_f * ((1 + cpi) ** (post_mo / 12.0))
+            real_post_gain = max(post_sale_val - post_cost_base, 0.0)
+            rate = mr if no_30_min else max(mr, 0.30)
+            post_tax = real_post_gain * rate
+
+            return max(pre_tax + post_tax, 0.0)
+
+    # =========================
     # MODEL HORIZON (MONTHLY)
     # =========================
 
@@ -356,8 +503,10 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         dfm[f"{prefix}_Active"] = 0   # ✅ add this
 
     for p in property_list:
-      prefix = p["name"].replace(" ", "_")
-      dfm[f"{prefix}_Is_PPOR"] = int(p.get("is_owner_occupied", False))
+        prefix = p["name"].replace(" ", "_")
+        dfm[f"{prefix}_Is_PPOR"]       = 0   # set dynamically each month in loop
+        dfm[f"{prefix}_CGT_Paid"]      = 0.0
+        dfm[f"{prefix}_Sale_Proceeds"] = 0.0
 
     dfm["Total_Net_Rent"] = 0.0
     dfm["Tax_Paid"] = 0.0
@@ -609,6 +758,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
         for p in property_list:
             prefix = p["name"].replace(" ", "_")
+            is_ppor_now = _is_ppor(p, year, month)
+            dfm.loc[i, f"{prefix}_Is_PPOR"] = int(is_ppor_now)
+
             if not prop_state[prefix]["active"]:
                 dfm.loc[i, f"{prefix}_Mortgage_Balance_Start"] = 0.0
                 dfm.loc[i, f"{prefix}_Mortgage_Balance"] = 0.0
@@ -630,7 +782,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
                 # keep compounding value + rent
                 prop_state[prefix]["property_value"] *= monthly_growth_factor(p["property_growth"])
-                if not p.get("is_owner_occupied", False):
+                if not is_ppor_now:
                     prop_state[prefix]["rent_monthly"] *= monthly_growth_factor(p["rental_growth"])
 
                 strata_m = (p["strata_quarterly"] * 4) / 12.0
@@ -643,7 +795,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 actual_pmt_m = 0.0
                 offset_alloc = 0.0
 
-                if p.get("is_owner_occupied", False):
+                if is_ppor_now:
                     owner_cost_m = strata_m + rates_m + other_m
                     net_rent_m = 0.0
                 else:
@@ -670,14 +822,29 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 total_pmt += 0.0
                 total_running_costs += (strata_m + rates_m + other_m)
 
+                # ---- Sale event (paid-off property) ----
+                _sale_yr = p.get("sale_year")
+                if _sale_yr and int(_sale_yr) == year and month == 12:
+                    _sp = p.get("sale_price")
+                    _sale_px = float(_sp) if _sp else prop_state[prefix]["property_value"]
+                    _cgt = _calc_cgt(p, int(_sale_yr), _sale_px, salary_m * 12,
+                                     float(inputs.get("cpi_rate", 0.025)),
+                                     bool(inputs.get("on_income_support", False)))
+                    _net_sale = _sale_px - _cgt   # loan is 0
+                    cash_balance += _net_sale
+                    dfm.loc[i, f"{prefix}_CGT_Paid"]      = _cgt
+                    dfm.loc[i, f"{prefix}_Sale_Proceeds"]  = _net_sale
+                    prop_state[prefix]["active"]           = False
+                    prop_state[prefix]["property_value"]   = 0.0
+
                 continue
 
 
 
             # Grow property value + rent monthly
             prop_state[prefix]["property_value"] *= monthly_growth_factor(p["property_growth"])
-            if not p.get("is_owner_occupied", False):
-              prop_state[prefix]["rent_monthly"] *= monthly_growth_factor(p["rental_growth"])
+            if not is_ppor_now:
+                prop_state[prefix]["rent_monthly"] *= monthly_growth_factor(p["rental_growth"])
 
 
             # Monthly property running costs
@@ -722,7 +889,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             prop_state[prefix]["remaining_months"] = max(prop_state[prefix]["remaining_months"] - 1, 0)
 
             # Net rent (cashflow): rent - interest - costs (principal is not an expense, it's repayment of balance)
-            if p.get("is_owner_occupied", False):
+            if is_ppor_now:
                 owner_cost_m = strata_m + rates_m + other_m
                 # PPOR: no rent, no deductible costs
                 net_rent_m = 0.0
@@ -763,6 +930,23 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             total_principal += principal_m
             total_pmt += actual_pmt_m
             total_running_costs += (strata_m + rates_m + other_m)
+
+            # ---- Sale event (property with loan) ----
+            _sale_yr = p.get("sale_year")
+            if _sale_yr and int(_sale_yr) == year and month == 12:
+                _sp = p.get("sale_price")
+                _sale_px = float(_sp) if _sp else prop_state[prefix]["property_value"]
+                _cgt = _calc_cgt(p, int(_sale_yr), _sale_px, salary_m * 12,
+                                 float(inputs.get("cpi_rate", 0.025)),
+                                 bool(inputs.get("on_income_support", False)))
+                _rem_loan = float(max(prop_state[prefix]["loan_balance"], 0.0))
+                _net_sale = _sale_px - _rem_loan - _cgt
+                cash_balance += _net_sale
+                dfm.loc[i, f"{prefix}_CGT_Paid"]      = _cgt
+                dfm.loc[i, f"{prefix}_Sale_Proceeds"]  = _net_sale
+                prop_state[prefix]["active"]           = False
+                prop_state[prefix]["loan_balance"]     = 0.0
+                prop_state[prefix]["property_value"]   = 0.0
 
         out_total_net_rent[i] = total_net_rent
 
@@ -893,7 +1077,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             total_prop_value += v
             total_mort_bal += b
 
-            if p.get("is_owner_occupied", False):
+            if _is_ppor(p, year, month):
                 ppor_value += v
                 ppor_mort += b
 
@@ -1157,9 +1341,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
       for p in property_list:
           prefix = p["name"].replace(" ", "_")
           agg.update({
-              f"{prefix}_Mortgage_Balance_Start": "first",  # ✅ ADD THIS
+              f"{prefix}_Mortgage_Balance_Start": "first",
               f"{prefix}_Mortgage_Balance": "last",
-              f"{prefix}_Monthly_Mortgage_PMT": "sum",  # total paid that year
+              f"{prefix}_Monthly_Mortgage_PMT": "sum",
               f"{prefix}_Mortgage_Interest": "sum",
               f"{prefix}_Mortgage_Principal": "sum",
               f"{prefix}_Property_Value": "last",
@@ -1167,9 +1351,12 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
               f"{prefix}_Strata": "sum",
               f"{prefix}_Rates": "sum",
               f"{prefix}_Other_Costs": "sum",
-              f"{prefix}_Offset_Allocated": "last",  # end-of-year allocated (snapshot)
+              f"{prefix}_Offset_Allocated": "last",
               f"{prefix}_Net_Rent": "sum",
               f"{prefix}_Purchase_Cashflow": "sum",
+              f"{prefix}_CGT_Paid": "sum",
+              f"{prefix}_Sale_Proceeds": "sum",
+              f"{prefix}_Is_PPOR": "last",
               "Total_Property_Value": "last",
               "Total_Mortgage_Balance": "last",
               "Total_Property_Equity": "last",
