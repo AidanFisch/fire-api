@@ -213,9 +213,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         elif income <= 180000: return 0.37
         else: return 0.45
 
-    def _exempt_months(prop, buy_yr, sale_yr):
+    def _exempt_months(prop, buy_yr, sale_yr, buy_mo=1):
         """Total CGT-exempt months = genuine PPOR + 6-year-rule window."""
-        p_abs = buy_yr * 12 + 1       # Jan of purchase year
+        p_abs = buy_yr * 12 + buy_mo  # actual purchase month
         s_abs = sale_yr * 12 + 12     # Dec of sale year
         total  = s_abs - p_abs
 
@@ -268,18 +268,20 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         PPOR & 6-year-rule exemption applied before bucket calc.
         """
         CGT_REFORM = 2027
-        buy_yr   = int(prop.get("year_bought", sale_yr))
+        buy_yr, buy_mo = _buy_year_month(prop)
         cost_base = float(prop.get("purchase_price", 0)) + float(prop.get("purchase_fees", 0))
 
         total_gain = float(sale_price_val) - cost_base
         if total_gain <= 0:
             return 0.0
 
-        total_mo  = max((sale_yr - buy_yr) * 12, 1)
+        buy_abs  = buy_yr * 12 + buy_mo
+        sale_abs = sale_yr * 12 + 12          # assume sold end of sale year
+        total_mo  = max(sale_abs - buy_abs, 1)
         held_long = (total_mo >= 12)
 
-        exempt_mo   = _exempt_months(prop, buy_yr, sale_yr)
-        tax_frac    = max(1.0 - exempt_mo / total_mo, 0.0)
+        exempt_mo  = _exempt_months(prop, buy_yr, sale_yr, buy_mo)
+        tax_frac   = max(1.0 - exempt_mo / total_mo, 0.0)
         if tax_frac <= 0:
             return 0.0
 
@@ -303,8 +305,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         # ---- Bucket B: owned before 2027, sell after ----
         else:
             reform_abs = CGT_REFORM * 12 + 7   # July 2027
-            buy_abs    = buy_yr * 12 + 1        # Jan of buy year
-            sale_abs   = sale_yr * 12 + 12      # Dec of sale year
 
             pre_mo  = max(reform_abs - buy_abs, 0)
             post_mo = max(sale_abs - reform_abs, 0)
@@ -428,9 +428,20 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     # PROPERTY STATE INITIALISATION (monthly engine)
     # =========================
 
-    # We assume settlements happen in January of year_bought. If you want a specific month, add "month_bought".
-    def purchase_month(year_bought: int) -> pd.Timestamp:
-        return pd.Timestamp(f"{year_bought}-01-01")
+    def _buy_year_month(p) -> tuple[int, int]:
+        """Return (year, month) for purchase, using purchase_date if present."""
+        pd_str = p.get("purchase_date")
+        if pd_str and isinstance(pd_str, str) and len(pd_str) >= 7:
+            try:
+                y, m = pd_str[:7].split("-")
+                return int(y), int(m)
+            except Exception:
+                pass
+        return int(p.get("year_bought", 2020)), 1
+
+    def purchase_month(p) -> pd.Timestamp:
+        y, m = _buy_year_month(p)
+        return pd.Timestamp(f"{y}-{m:02d}-01")
 
     # Property state containers
     prop_state = {}
@@ -448,14 +459,17 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     # If property already owned before start_year, initialise as active at start
     for p in property_list:
         name = p["name"].replace(" ", "_")
-        if p["year_bought"] < start_year:
-            # treat as active from start
+        buy_y, buy_mo = _buy_year_month(p)
+        # already owned if purchase is strictly before the model start month
+        already_owned = (buy_y < start_year) or (buy_y == start_year and buy_mo == 1)
+        if already_owned and not (buy_y == start_year and buy_mo > 1):
             prop_state[name]["active"] = True
             prop_state[name]["loan_balance"] = float(p["loan_balance_current"])
             prop_state[name]["property_value"] = float(p["current_value"])
             prop_state[name]["rent_monthly"] = float(p["monthly_rent"])
 
-            elapsed = months_between_years(p["year_bought"], start_year)  # assumes bought Jan year_bought
+            # Elapsed months since purchase (using actual purchase month)
+            elapsed = (start_year - buy_y) * 12 - buy_mo + 1
             total_term = int(p["loan_term_years"] * 12)
             remaining = max(total_term - elapsed, 1)
             prop_state[name]["remaining_months"] = remaining
@@ -686,9 +700,9 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         purchase_cashflow_total = 0.0
         for p in property_list:
             prefix = p["name"].replace(" ", "_")
-            buy_dt = purchase_month(p["year_bought"])
+            buy_dt = purchase_month(p)
 
-            if dt == buy_dt and p["year_bought"] >= start_year:
+            if dt == buy_dt and (buy_dt.year > start_year or (buy_dt.year == start_year and buy_dt.month > 1)):
                 # Cash needed at purchase: deposit + fees = purchase_price + fees - loan
                 cash_needed = (p["purchase_price"] + p["purchase_fees"] - p["original_loan"])
                 purchase_cashflow_total -= cash_needed
