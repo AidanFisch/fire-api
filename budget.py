@@ -265,6 +265,10 @@ def get_series(from_month: str, to_month: str) -> Dict[str, Any]:
                     cumulative_actual += net_a
                 series.append({
                     "month": m,
+                    "income_planned":  roll["income"]["planned"],
+                    "income_actual":   roll["income"]["actual"],
+                    "expense_planned": roll["expenses_total"]["planned"],
+                    "expense_actual":  roll["expenses_total"]["actual"],
                     "net_planned": net_p,
                     "net_actual": net_a,
                     "cumulative_actual": round(cumulative_actual, 2)
@@ -272,6 +276,10 @@ def get_series(from_month: str, to_month: str) -> Dict[str, Any]:
             else:
                 series.append({
                     "month": m,
+                    "income_planned":  0.0,
+                    "income_actual":   None,
+                    "expense_planned": 0.0,
+                    "expense_actual":  None,
                     "net_planned": 0.0,
                     "net_actual": None,
                     "cumulative_actual": round(cumulative_actual, 2)
