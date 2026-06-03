@@ -213,10 +213,24 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         elif income <= 180000: return 0.37
         else: return 0.45
 
-    def _exempt_months(prop, buy_yr, sale_yr, buy_mo=1):
+    def _sale_year_month(p):
+        """Return (year, month) for sale, using sale_date if present."""
+        sd = p.get("sale_date")
+        if sd and isinstance(sd, str) and len(sd) >= 7:
+            try:
+                y, m = sd[:7].split("-")
+                return int(y), int(m)
+            except Exception:
+                pass
+        yr = p.get("sale_year")
+        if yr:
+            return int(yr), 12   # legacy: assume December
+        return None, None
+
+    def _exempt_months(prop, buy_yr, sale_yr, buy_mo=1, sale_mo=12):
         """Total CGT-exempt months = genuine PPOR + 6-year-rule window."""
-        p_abs = buy_yr * 12 + buy_mo  # actual purchase month
-        s_abs = sale_yr * 12 + 12     # Dec of sale year
+        p_abs = buy_yr * 12 + buy_mo   # actual purchase month
+        s_abs = sale_yr * 12 + sale_mo  # exact sale month
         total  = s_abs - p_abs
 
         periods = prop.get("ppor_periods")
@@ -257,17 +271,17 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         return min(exempt, total)
 
     def _calc_cgt(prop, sale_yr, sale_price_val, annual_income,
-                  cpi=0.025, no_30_min=False):
+                  cpi=0.025, no_30_min=False, sale_mo=12):
         """
         Return CGT tax payable on property sale.
 
         Applies:
           Bucket A (sell < Jul 2027):   50% discount + marginal rate
-          Bucket B (buy < 2027, sell >= 2027): split at Jul 2027
+          Bucket B (buy < Jul 2027, sell >= Jul 2027): split at Jul 2027
           Bucket C (buy >= Jul 2027):   CPI indexation + 30% min tax
         PPOR & 6-year-rule exemption applied before bucket calc.
         """
-        CGT_REFORM = 2027
+        REFORM_ABS = 2027 * 12 + 7   # July 2027 (absolute month index)
         buy_yr, buy_mo = _buy_year_month(prop)
         cost_base = float(prop.get("purchase_price", 0)) + float(prop.get("purchase_fees", 0))
 
@@ -276,11 +290,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             return 0.0
 
         buy_abs  = buy_yr * 12 + buy_mo
-        sale_abs = sale_yr * 12 + 12          # assume sold end of sale year
+        sale_abs = sale_yr * 12 + sale_mo
         total_mo  = max(sale_abs - buy_abs, 1)
         held_long = (total_mo >= 12)
 
-        exempt_mo  = _exempt_months(prop, buy_yr, sale_yr, buy_mo)
+        exempt_mo  = _exempt_months(prop, buy_yr, sale_yr, buy_mo, sale_mo)
         tax_frac   = max(1.0 - exempt_mo / total_mo, 0.0)
         if tax_frac <= 0:
             return 0.0
@@ -288,26 +302,24 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         mr = _marginal_rate(float(annual_income))
 
         # ---- Bucket A: sell before 1 Jul 2027 ----
-        if sale_yr < CGT_REFORM:
+        if sale_abs < REFORM_ABS:
             gain = total_gain * tax_frac
             if held_long:
                 gain *= 0.5          # 50% CGT discount
             return max(gain * mr, 0.0)
 
         # ---- Bucket C: bought on/after 1 Jul 2027 ----
-        elif buy_yr >= CGT_REFORM:
+        elif buy_abs >= REFORM_ABS:
             yrs = total_mo / 12.0
             indexed_cost = cost_base * ((1 + cpi) ** yrs)
             real_gain    = max(float(sale_price_val) - indexed_cost, 0.0) * tax_frac
             rate = mr if no_30_min else max(mr, 0.30)
             return max(real_gain * rate, 0.0)
 
-        # ---- Bucket B: owned before 2027, sell after ----
+        # ---- Bucket B: owned before Jul 2027, sell after ----
         else:
-            reform_abs = CGT_REFORM * 12 + 7   # July 2027
-
-            pre_mo  = max(reform_abs - buy_abs, 0)
-            post_mo = max(sale_abs - reform_abs, 0)
+            pre_mo  = max(REFORM_ABS - buy_abs, 0)
+            post_mo = max(sale_abs - REFORM_ABS, 0)
             pre_f   = pre_mo / total_mo
             post_f  = post_mo / total_mo
 
@@ -837,13 +849,14 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                 total_running_costs += (strata_m + rates_m + other_m)
 
                 # ---- Sale event (paid-off property) ----
-                _sale_yr = p.get("sale_year")
-                if _sale_yr and int(_sale_yr) == year and month == 12:
+                _sale_yr, _sale_mo = _sale_year_month(p)
+                if _sale_yr and int(_sale_yr) == year and int(_sale_mo) == month:
                     _sp = p.get("sale_price")
                     _sale_px = float(_sp) if _sp else prop_state[prefix]["property_value"]
                     _cgt = _calc_cgt(p, int(_sale_yr), _sale_px, salary_m * 12,
                                      float(inputs.get("cpi_rate", 0.025)),
-                                     bool(inputs.get("on_income_support", False)))
+                                     bool(inputs.get("on_income_support", False)),
+                                     sale_mo=int(_sale_mo))
                     _net_sale = _sale_px - _cgt   # loan is 0
                     cash_balance += _net_sale
                     dfm.loc[i, f"{prefix}_CGT_Paid"]      = _cgt
@@ -946,13 +959,14 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             total_running_costs += (strata_m + rates_m + other_m)
 
             # ---- Sale event (property with loan) ----
-            _sale_yr = p.get("sale_year")
-            if _sale_yr and int(_sale_yr) == year and month == 12:
+            _sale_yr, _sale_mo = _sale_year_month(p)
+            if _sale_yr and int(_sale_yr) == year and int(_sale_mo) == month:
                 _sp = p.get("sale_price")
                 _sale_px = float(_sp) if _sp else prop_state[prefix]["property_value"]
                 _cgt = _calc_cgt(p, int(_sale_yr), _sale_px, salary_m * 12,
                                  float(inputs.get("cpi_rate", 0.025)),
-                                 bool(inputs.get("on_income_support", False)))
+                                 bool(inputs.get("on_income_support", False)),
+                                 sale_mo=int(_sale_mo))
                 _rem_loan = float(max(prop_state[prefix]["loan_balance"], 0.0))
                 _net_sale = _sale_px - _rem_loan - _cgt
                 cash_balance += _net_sale
