@@ -208,19 +208,21 @@ def stripe_create_checkout(payload: Dict[str, Any] = Body(...)):
 @app.get("/stripe/verify-session")
 def stripe_verify_session(session_id: str):
     try:
-        session = stripe.checkout.Session.retrieve(
-            session_id,
-            expand=["subscription"]
-        )
-        paid = session.payment_status == "paid"
-        sub  = session.subscription
+        session = stripe.checkout.Session.retrieve(session_id)
+        paid    = session.payment_status == "paid"
+        sub_id  = session.subscription  # string ID when not expanded
+        sub     = None
+        if sub_id and isinstance(sub_id, str):
+            sub = stripe.Subscription.retrieve(sub_id)
         return {
-            "paid":                  paid,
-            "subscription_id":       sub.id            if sub else None,
-            "subscription_status":   sub.status        if sub else None,
-            "current_period_end":    sub.current_period_end if sub else None,
+            "paid":               paid,
+            "subscription_id":    sub.id                if sub else sub_id,
+            "subscription_status":sub.status            if sub else None,
+            "current_period_end": sub.current_period_end if sub else None,
         }
     except stripe.StripeError as e:
+        print(f"[stripe] verify-session StripeError: {e}", flush=True)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        print(f"[stripe] verify-session error: {e}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
