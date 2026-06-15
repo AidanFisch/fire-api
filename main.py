@@ -214,11 +214,12 @@ def stripe_verify_session(session_id: str):
         sub     = None
         if sub_id and isinstance(sub_id, str):
             sub = stripe.Subscription.retrieve(sub_id)
+        sub_dict = dict(sub) if sub else {}
         return {
             "paid":               paid,
-            "subscription_id":    sub.id                if sub else sub_id,
-            "subscription_status":sub.status            if sub else None,
-            "current_period_end": sub.current_period_end if sub else None,
+            "subscription_id":    sub_dict.get("id", sub_id),
+            "subscription_status":sub_dict.get("status"),
+            "current_period_end": sub_dict.get("current_period_end"),
         }
     except stripe.StripeError as e:
         print(f"[stripe] verify-session StripeError: {e}", flush=True)
