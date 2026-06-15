@@ -3,3 +3,4 @@ uvicorn[standard]==0.40.0
 pandas
 numpy
 pydantic
+stripe

@@ -3,6 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 import time
+import os
+import stripe
+
+stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 
 from model import run_fire_model  # <-- your big function lives in model.py
 
@@ -171,3 +175,52 @@ def budget_categories():
         return {"categories": list_all_categories()}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+# -------- Stripe endpoints --------
+
+@app.post("/stripe/create-checkout")
+def stripe_create_checkout(payload: Dict[str, Any] = Body(...)):
+    try:
+        price_id    = payload.get("price_id")
+        email       = payload.get("email")
+        success_url = payload.get("success_url", "https://wealthmodel.io")
+        cancel_url  = payload.get("cancel_url",  "https://wealthmodel.io")
+
+        if not price_id:
+            raise HTTPException(status_code=400, detail="price_id required")
+
+        session = stripe.checkout.Session.create(
+            payment_method_types=["card"],
+            line_items=[{"price": price_id, "quantity": 1}],
+            mode="subscription",
+            success_url=success_url + "?checkout_success=true&session_id={CHECKOUT_SESSION_ID}",
+            cancel_url=cancel_url,
+            customer_email=email or None,
+        )
+        return {"url": session.url}
+    except stripe.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/stripe/verify-session")
+def stripe_verify_session(session_id: str):
+    try:
+        session = stripe.checkout.Session.retrieve(
+            session_id,
+            expand=["subscription"]
+        )
+        paid = session.payment_status == "paid"
+        sub  = session.subscription
+        return {
+            "paid":                  paid,
+            "subscription_id":       sub.id            if sub else None,
+            "subscription_status":   sub.status        if sub else None,
+            "current_period_end":    sub.current_period_end if sub else None,
+        }
+    except stripe.StripeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
