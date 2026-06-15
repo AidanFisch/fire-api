@@ -210,19 +210,31 @@ def stripe_verify_session(session_id: str):
     try:
         session = stripe.checkout.Session.retrieve(session_id)
         paid    = session.payment_status == "paid"
-        sub_id  = session.subscription  # string ID when not expanded
-        sub     = None
+        sub_id  = session.subscription  # string ID (not expanded)
+        print(f"[stripe] verify-session paid={paid} sub_id={sub_id}", flush=True)
+
+        # Fetch subscription details safely — skip gracefully if unavailable
+        sub_status = None
+        cpe        = None
         if sub_id and isinstance(sub_id, str):
-            sub = stripe.Subscription.retrieve(sub_id)
+            try:
+                sub        = stripe.Subscription.retrieve(sub_id)
+                sub_status = getattr(sub, "status", None)
+                cpe        = getattr(sub, "current_period_end", None)
+                print(f"[stripe] sub status={sub_status} cpe={cpe}", flush=True)
+            except Exception as sub_err:
+                print(f"[stripe] sub fetch error (non-fatal): {sub_err}", flush=True)
+
         return {
             "paid":               paid,
-            "subscription_id":    getattr(sub, "id", None) or sub_id,
-            "subscription_status":getattr(sub, "status", None),
-            "current_period_end": getattr(sub, "current_period_end", None),
+            "subscription_id":    sub_id,
+            "subscription_status":sub_status,
+            "current_period_end": cpe,
         }
     except stripe.StripeError as e:
         print(f"[stripe] verify-session StripeError: {e}", flush=True)
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        print(f"[stripe] verify-session error: {e}", flush=True)
+        import traceback
+        print(f"[stripe] verify-session error: {traceback.format_exc()}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
