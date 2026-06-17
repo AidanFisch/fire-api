@@ -205,6 +205,31 @@ def stripe_create_checkout(payload: Dict[str, Any] = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/stripe/customer-portal")
+def stripe_customer_portal(payload: Dict[str, Any] = Body(...)):
+    try:
+        sub_id     = payload.get("subscription_id")
+        return_url = payload.get("return_url", "https://wealthmodel.io")
+        if not sub_id:
+            raise HTTPException(status_code=400, detail="subscription_id required")
+        sub         = stripe.Subscription.retrieve(sub_id)
+        customer_id = getattr(sub, "customer", None)
+        if not customer_id:
+            raise HTTPException(status_code=400, detail="No customer found for subscription")
+        portal = stripe.billing_portal.Session.create(
+            customer=customer_id,
+            return_url=return_url,
+        )
+        return {"url": portal.url}
+    except stripe.StripeError as e:
+        print(f"[stripe] customer-portal StripeError: {e}", flush=True)
+        raise HTTPException(status_code=400, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[stripe] customer-portal error: {e}", flush=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/stripe/verify-session")
 def stripe_verify_session(session_id: str):
     try:
