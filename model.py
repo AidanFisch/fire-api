@@ -533,6 +533,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         dfm[f"{prefix}_Is_PPOR"]       = 0   # set dynamically each month in loop
         dfm[f"{prefix}_CGT_Paid"]      = 0.0
         dfm[f"{prefix}_Sale_Proceeds"] = 0.0
+        dfm[f"{prefix}_Sale_Costs"]    = 0.0
 
     dfm["Total_Net_Rent"] = 0.0
     dfm["Tax_Paid"] = 0.0
@@ -857,9 +858,13 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                                      float(inputs.get("cpi_rate", 0.025)),
                                      bool(inputs.get("on_income_support", False)),
                                      sale_mo=int(_sale_mo))
-                    _net_sale = _sale_px - _cgt   # loan is 0
+                    _agent_rate   = float(p.get("sale_agent_rate", 0.022))
+                    _conveyancing = float(p.get("sale_conveyancing", 2500))
+                    _sale_costs   = _sale_px * _agent_rate + _conveyancing
+                    _net_sale = _sale_px - _cgt - _sale_costs   # loan is 0
                     cash_balance += _net_sale
                     dfm.loc[i, f"{prefix}_CGT_Paid"]      = _cgt
+                    dfm.loc[i, f"{prefix}_Sale_Costs"]    = _sale_costs
                     dfm.loc[i, f"{prefix}_Sale_Proceeds"]  = _net_sale
                     prop_state[prefix]["active"]           = False
                     prop_state[prefix]["property_value"]   = 0.0
@@ -967,10 +972,14 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
                                  float(inputs.get("cpi_rate", 0.025)),
                                  bool(inputs.get("on_income_support", False)),
                                  sale_mo=int(_sale_mo))
-                _rem_loan = float(max(prop_state[prefix]["loan_balance"], 0.0))
-                _net_sale = _sale_px - _rem_loan - _cgt
+                _rem_loan     = float(max(prop_state[prefix]["loan_balance"], 0.0))
+                _agent_rate   = float(p.get("sale_agent_rate", 0.022))
+                _conveyancing = float(p.get("sale_conveyancing", 2500))
+                _sale_costs   = _sale_px * _agent_rate + _conveyancing
+                _net_sale = _sale_px - _rem_loan - _cgt - _sale_costs
                 cash_balance += _net_sale
                 dfm.loc[i, f"{prefix}_CGT_Paid"]      = _cgt
+                dfm.loc[i, f"{prefix}_Sale_Costs"]    = _sale_costs
                 dfm.loc[i, f"{prefix}_Sale_Proceeds"]  = _net_sale
                 prop_state[prefix]["active"]           = False
                 prop_state[prefix]["loan_balance"]     = 0.0
@@ -1383,6 +1392,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
               f"{prefix}_Net_Rent": "sum",
               f"{prefix}_Purchase_Cashflow": "sum",
               f"{prefix}_CGT_Paid": "sum",
+              f"{prefix}_Sale_Costs": "sum",
               f"{prefix}_Sale_Proceeds": "sum",
               f"{prefix}_Is_PPOR": "last",
               "Total_Property_Value": "last",
