@@ -1,12 +1,35 @@
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 import time
 import os
+import json
 import stripe
+import firebase_admin
+from firebase_admin import credentials, firestore
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
+
+# -------- Firebase Admin (server-side only — bypasses Firestore security
+# rules, so this is the only place subscription.tier may ever be written) --------
+_fb_sa_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT_JSON", "")
+if _fb_sa_json:
+    firebase_admin.initialize_app(credentials.Certificate(json.loads(_fb_sa_json)))
+    fs_db = firestore.client()
+else:
+    fs_db = None
+    print("[firebase] FIREBASE_SERVICE_ACCOUNT_JSON not set — subscription writes disabled", flush=True)
+
+def _set_subscription(firebase_uid: Optional[str], data: Dict[str, Any]):
+    if not fs_db or not firebase_uid:
+        print(f"[stripe] skip subscription write — fs_db={bool(fs_db)} uid={firebase_uid}", flush=True)
+        return
+    fs_db.collection("profiles").document(firebase_uid).set(
+        {"subscription": {**data, "updatedAt": firestore.SERVER_TIMESTAMP}},
+        merge=True
+    )
 
 from model import run_fire_model  # <-- your big function lives in model.py
 
@@ -181,13 +204,16 @@ def budget_categories():
 @app.post("/stripe/create-checkout")
 def stripe_create_checkout(payload: Dict[str, Any] = Body(...)):
     try:
-        price_id    = payload.get("price_id")
-        email       = payload.get("email")
-        success_url = payload.get("success_url", "https://wealthmodel.io")
-        cancel_url  = payload.get("cancel_url",  "https://wealthmodel.io")
+        price_id     = payload.get("price_id")
+        email        = payload.get("email")
+        firebase_uid = payload.get("firebase_uid")
+        success_url  = payload.get("success_url", "https://wealthmodel.io")
+        cancel_url   = payload.get("cancel_url",  "https://wealthmodel.io")
 
         if not price_id:
             raise HTTPException(status_code=400, detail="price_id required")
+        if not firebase_uid:
+            raise HTTPException(status_code=400, detail="firebase_uid required")
 
         session = stripe.checkout.Session.create(
             payment_method_types=["card"],
@@ -196,6 +222,10 @@ def stripe_create_checkout(payload: Dict[str, Any] = Body(...)):
             success_url=success_url + "?checkout_success=true&session_id={CHECKOUT_SESSION_ID}",
             cancel_url=cancel_url,
             customer_email=email or None,
+            # Lets the webhook map Stripe events back to a Firestore profile
+            # without trusting anything the client sends after the fact.
+            client_reference_id=firebase_uid,
+            subscription_data={"metadata": {"firebase_uid": firebase_uid}},
         )
         return {"url": session.url}
     except stripe.StripeError as e:
@@ -263,3 +293,69 @@ def stripe_verify_session(session_id: str):
         import traceback
         print(f"[stripe] verify-session error: {traceback.format_exc()}", flush=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/stripe/webhook")
+async def stripe_webhook(request: Request):
+    """
+    Source of truth for subscription.tier. Stripe signs every event with
+    STRIPE_WEBHOOK_SECRET, so this is the only path (besides the Firebase
+    console) that can grant Pro — the client can no longer write its own
+    subscription field once Firestore rules are tightened.
+    """
+    payload    = await request.body()
+    sig_header = request.headers.get("stripe-signature", "")
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=500, detail="Webhook secret not configured")
+    try:
+        event = stripe.Webhook.construct_event(payload, sig_header, STRIPE_WEBHOOK_SECRET)
+    except (ValueError, stripe.SignatureVerificationError) as e:
+        print(f"[stripe] webhook signature error: {e}", flush=True)
+        raise HTTPException(status_code=400, detail="Invalid signature")
+
+    etype = event["type"]
+    obj   = event["data"]["object"]
+    print(f"[stripe] webhook event={etype}", flush=True)
+
+    try:
+        if etype == "checkout.session.completed":
+            uid         = obj.get("client_reference_id")
+            sub_id      = obj.get("subscription")
+            customer_id = obj.get("customer")
+            status, cpe = None, None
+            if sub_id:
+                sub    = stripe.Subscription.retrieve(sub_id)
+                status = sub.status
+                cpe    = sub.current_period_end
+            _set_subscription(uid, {
+                "tier":             "pro" if status in ("active", "trialing") else "free",
+                "stripeCustomerId": customer_id,
+                "subscriptionId":   sub_id,
+                "status":           status,
+                "currentPeriodEnd": cpe,
+            })
+
+        elif etype in ("customer.subscription.updated", "customer.subscription.created"):
+            uid    = (obj.get("metadata") or {}).get("firebase_uid")
+            status = obj.get("status")
+            _set_subscription(uid, {
+                "tier":             "pro" if status in ("active", "trialing") else "free",
+                "stripeCustomerId": obj.get("customer"),
+                "subscriptionId":   obj.get("id"),
+                "status":           status,
+                "currentPeriodEnd": obj.get("current_period_end"),
+            })
+
+        elif etype == "customer.subscription.deleted":
+            uid = (obj.get("metadata") or {}).get("firebase_uid")
+            _set_subscription(uid, {
+                "tier":             "free",
+                "stripeCustomerId": obj.get("customer"),
+                "subscriptionId":   obj.get("id"),
+                "status":           "canceled",
+                "currentPeriodEnd": obj.get("current_period_end"),
+            })
+    except Exception as e:
+        print(f"[stripe] webhook handling error ({etype}): {e}", flush=True)
+        raise HTTPException(status_code=500, detail="Webhook handling error")
+
+    return {"received": True}
