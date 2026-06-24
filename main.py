@@ -318,14 +318,14 @@ async def stripe_webhook(request: Request):
 
     try:
         if etype == "checkout.session.completed":
-            uid         = obj.get("client_reference_id")
-            sub_id      = obj.get("subscription")
-            customer_id = obj.get("customer")
+            uid         = getattr(obj, "client_reference_id", None)
+            sub_id      = getattr(obj, "subscription", None)
+            customer_id = getattr(obj, "customer", None)
             status, cpe = None, None
             if sub_id:
                 sub    = stripe.Subscription.retrieve(sub_id)
-                status = sub.status
-                cpe    = sub.current_period_end
+                status = getattr(sub, "status", None)
+                cpe    = getattr(sub, "current_period_end", None)
             _set_subscription(uid, {
                 "tier":             "pro" if status in ("active", "trialing") else "free",
                 "stripeCustomerId": customer_id,
@@ -335,24 +335,26 @@ async def stripe_webhook(request: Request):
             })
 
         elif etype in ("customer.subscription.updated", "customer.subscription.created"):
-            uid    = (obj.get("metadata") or {}).get("firebase_uid")
-            status = obj.get("status")
+            metadata = getattr(obj, "metadata", None)
+            uid      = getattr(metadata, "firebase_uid", None) if metadata else None
+            status   = getattr(obj, "status", None)
             _set_subscription(uid, {
                 "tier":             "pro" if status in ("active", "trialing") else "free",
-                "stripeCustomerId": obj.get("customer"),
-                "subscriptionId":   obj.get("id"),
+                "stripeCustomerId": getattr(obj, "customer", None),
+                "subscriptionId":   getattr(obj, "id", None),
                 "status":           status,
-                "currentPeriodEnd": obj.get("current_period_end"),
+                "currentPeriodEnd": getattr(obj, "current_period_end", None),
             })
 
         elif etype == "customer.subscription.deleted":
-            uid = (obj.get("metadata") or {}).get("firebase_uid")
+            metadata = getattr(obj, "metadata", None)
+            uid      = getattr(metadata, "firebase_uid", None) if metadata else None
             _set_subscription(uid, {
                 "tier":             "free",
-                "stripeCustomerId": obj.get("customer"),
-                "subscriptionId":   obj.get("id"),
+                "stripeCustomerId": getattr(obj, "customer", None),
+                "subscriptionId":   getattr(obj, "id", None),
                 "status":           "canceled",
-                "currentPeriodEnd": obj.get("current_period_end"),
+                "currentPeriodEnd": getattr(obj, "current_period_end", None),
             })
     except Exception as e:
         print(f"[stripe] webhook handling error ({etype}): {e}", flush=True)
