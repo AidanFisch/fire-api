@@ -922,8 +922,11 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
             # Net rent (cashflow): rent - interest - costs (principal is not an expense, it's repayment of balance)
             if is_ppor_now:
-                owner_cost_m = strata_m + rates_m + other_m
-                # PPOR: no rent, no deductible costs
+                # PPOR: no rent, interest isn't tax-deductible (so it stays out of
+                # net_rent_m / taxable income), but it's still real cash leaving your
+                # pocket every month — must be counted in owner_cost_m or it vanishes
+                # from the cash balance entirely.
+                owner_cost_m = interest_m + strata_m + rates_m + other_m
                 net_rent_m = 0.0
             else:
                 # Investment property
@@ -1446,7 +1449,6 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
       # Yearly summary (what you were printing before)
       dfy = dfy.round(0)
-      print(dfy.to_csv(index=False))
 
 
     if display_month:
