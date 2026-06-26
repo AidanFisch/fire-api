@@ -235,6 +235,24 @@ def stripe_create_checkout(payload: Dict[str, Any] = Body(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/stripe/cancel-subscription")
+def stripe_cancel_subscription(payload: Dict[str, Any] = Body(...)):
+    """
+    Best-effort immediate cancellation, used when a user deletes their
+    account entirely. Always returns 200 — a Stripe-side failure here
+    (e.g. subscription already cancelled) shouldn't block account deletion;
+    the subscription.deleted webhook is the real source of truth either way.
+    """
+    sub_id = payload.get("subscription_id")
+    if not sub_id:
+        return {"cancelled": False, "detail": "no subscription_id provided"}
+    try:
+        stripe.Subscription.cancel(sub_id)
+        return {"cancelled": True}
+    except Exception as e:
+        print(f"[stripe] cancel-subscription error: {e}", flush=True)
+        return {"cancelled": False, "detail": str(e)}
+
 @app.post("/stripe/customer-portal")
 def stripe_customer_portal(payload: Dict[str, Any] = Body(...)):
     try:
