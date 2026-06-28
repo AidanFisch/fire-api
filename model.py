@@ -103,7 +103,7 @@ property_list_default = [property_1_input, property_3_input]
 
 from typing import Optional
 
-def run_fire_model(inputs: dict | None, property_list: list | None, display_month: bool = True):
+def run_fire_model(inputs: dict | None, property_list: list | None, life_events: list | None = None, display_month: bool = True):
     import pandas as pd
     import numpy as np
     from datetime import date
@@ -121,6 +121,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         inputs = inputs_default
     if property_list is None:
         property_list = []
+    if life_events is None:
+        life_events = []
 
     ###debugging###
     required_input_keys = set(inputs_default.keys())
@@ -187,6 +189,23 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         """'YYYY-MM' → (year, month) ints."""
         y, m = ym.split("-")
         return int(y), int(m)
+
+    def _is_life_event_active(ev, yr, mo):
+        """Is this income/expense-change event in effect for the given year/month?
+        Open-ended (no 'end') means it runs for the rest of the model horizon."""
+        start = ev.get("start")
+        if not start:
+            return False
+        sy, sm = _parse_ym(start)
+        cur_abs = yr * 12 + mo
+        if cur_abs < sy * 12 + sm:
+            return False
+        end = ev.get("end")
+        if end:
+            ey, em = _parse_ym(end)
+            if cur_abs > ey * 12 + em:
+                return False
+        return True
 
     def _is_ppor(prop, yr, mo):
         """Is this property the PPOR in the given year/month?"""
@@ -612,6 +631,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     out_total_net_rent = np.zeros(n, dtype=float)
     out_tax_paid = np.zeros(n, dtype=float)
     out_cash_end = np.zeros(n, dtype=float)
+    out_life_event_cashflow = np.zeros(n, dtype=float)
 
     out_stock_draw = np.zeros(n, dtype=float)
     out_super_draw = np.zeros(n, dtype=float)
@@ -684,7 +704,23 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
         expenses_m = expenses_monthly_arr[i]
         target_m = target_monthly_arr[i]
 
-        
+        # ---- Life events: temporary income/expense changes + one-off lump sums.
+        # Applied before salary_m/expenses_m flow into super, tax, and cash below,
+        # same way property cashflow is layered onto the base mortgage calc.
+        life_event_cashflow_m = 0.0
+        for ev in life_events:
+            etype = ev.get("type")
+            amt = float(ev.get("amount", 0) or 0)
+            if etype == "income_change" and not fired and _is_life_event_active(ev, year, month):
+                salary_m += salary_m * (amt / 100.0) if ev.get("mode") == "percent" else amt
+            elif etype == "expense_change" and _is_life_event_active(ev, year, month):
+                expenses_m += expenses_m * (amt / 100.0) if ev.get("mode") == "percent" else amt
+            elif etype == "windfall" and ev.get("start"):
+                ey, em = _parse_ym(ev["start"])
+                if ey == year and em == month:
+                    life_event_cashflow_m += amt
+        salary_m = max(salary_m, 0.0)
+        expenses_m = max(expenses_m, 0.0)
 
         stock_contrib_m = 0.0 if fired else stock_contrib
 
@@ -1187,6 +1223,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
             + total_net_rent
             + stock_withdraw_m
             + super_withdraw_m
+            + life_event_cashflow_m
             - expenses_m
             - stock_contrib_m
             - super_extra_m
@@ -1228,6 +1265,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
 
 
         out_cash_end[i] = cash_balance
+        out_life_event_cashflow[i] = life_event_cashflow_m
 
         out_net_worth_incl_ppor[i] = cash_balance + stock_balance + total_prop_value - total_mort_bal
         out_net_worth_ex_ppor[i] = (
@@ -1260,6 +1298,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
     dfm["Total_Net_Rent"] = out_total_net_rent
     dfm["Tax_Paid"] = out_tax_paid
     dfm["Cash_Balance_End"] = out_cash_end
+    dfm["Life_Event_Cashflow"] = out_life_event_cashflow
 
     dfm["Stock_Drawdown_Monthly"] = out_stock_draw
     dfm["Super_Drawdown_Monthly"] = out_super_draw
@@ -1348,6 +1387,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, display_mont
           "Net_Worth_Incl_Super_Ex_PPOR": "last",
           "Total_Net_Rent": "sum",
           "Tax_Paid": "sum",
+          "Life_Event_Cashflow": "sum",
           "Cash_Balance_End": "last",
           "Total_Property_Value": "last",
           "Total_Mortgage_Balance": "last",
