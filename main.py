@@ -7,7 +7,8 @@ import os
 import json
 import stripe
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore, auth as fb_auth
+from datetime import date
 
 stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
 STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
@@ -30,6 +31,46 @@ def _set_subscription(firebase_uid: Optional[str], data: Dict[str, Any]):
         {"subscription": {**data, "updatedAt": firestore.SERVER_TIMESTAMP}},
         merge=True
     )
+
+# -------- Per-account model-run quota (server-enforced) --------
+# A client-side-only counter can be wiped by incognito mode or clearing
+# localStorage. Verifying the Firebase ID token and checking/incrementing
+# the quota here means the limit actually follows the account, not the
+# browser. Anonymous (no token) requests are left ungated — there's no
+# account to tie a server-side limit to, and the existing client-side
+# check already gives reasonable friction for that case.
+FREE_DAILY_RUN_LIMIT = 5
+
+def _get_uid_from_request(request: Request) -> Optional[str]:
+    authz = request.headers.get("authorization") or request.headers.get("Authorization")
+    if not authz or not authz.startswith("Bearer "):
+        return None
+    token = authz.split(" ", 1)[1]
+    try:
+        decoded = fb_auth.verify_id_token(token)
+        return decoded.get("uid")
+    except Exception as e:
+        print(f"[auth] token verify failed: {e}", flush=True)
+        return None
+
+def _check_and_increment_run_quota(uid: str) -> Optional[str]:
+    """Returns None if OK to proceed, or an error detail string if the free
+    daily run quota is exceeded. Pro accounts are unlimited."""
+    if not fs_db:
+        return None
+    doc_ref = fs_db.collection("profiles").document(uid)
+    snap = doc_ref.get()
+    data = snap.to_dict() or {}
+    tier = (data.get("subscription") or {}).get("tier")
+    if tier == "pro":
+        return None
+    today = date.today().isoformat()
+    usage = data.get("modelRunUsage") or {}
+    count = usage.get("count", 0) if usage.get("date") == today else 0
+    if count >= FREE_DAILY_RUN_LIMIT:
+        return f"Free plan is limited to {FREE_DAILY_RUN_LIMIT} model runs per day. Upgrade for unlimited runs."
+    doc_ref.set({"modelRunUsage": {"date": today, "count": count + 1}}, merge=True)
+    return None
 
 from model import run_fire_model  # <-- your big function lives in model.py
 
@@ -76,7 +117,13 @@ def health():
     return {"ok": True}
 
 @app.post("/fire")
-def fire_calc(req: FireRequest):
+def fire_calc(req: FireRequest, request: Request):
+    uid = _get_uid_from_request(request)
+    if uid:
+        quota_error = _check_and_increment_run_quota(uid)
+        if quota_error:
+            raise HTTPException(status_code=403, detail=quota_error)
+
     t0 = time.perf_counter()
     try:
         t1 = time.perf_counter()
