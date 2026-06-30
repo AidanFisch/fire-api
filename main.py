@@ -110,6 +110,7 @@ class FireRequest(BaseModel):
     inputs: Dict[str, Any] = Field(..., description="Full inputs dict from frontend")
     property_list: List[Dict[str, Any]] = Field(default_factory=list)
     life_events: List[Dict[str, Any]] = Field(default_factory=list)
+    stock_contribution_overrides: List[Dict[str, Any]] = Field(default_factory=list)
     display_month: bool = True
 
 @app.get("/health")
@@ -131,6 +132,7 @@ def fire_calc(req: FireRequest, request: Request):
             inputs=req.inputs,
             property_list=req.property_list,
             life_events=req.life_events,
+            stock_contribution_overrides=req.stock_contribution_overrides,
             display_month=req.display_month
         )
         t2 = time.perf_counter()

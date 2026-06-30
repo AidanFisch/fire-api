@@ -103,7 +103,7 @@ property_list_default = [property_1_input, property_3_input]
 
 from typing import Optional
 
-def run_fire_model(inputs: dict | None, property_list: list | None, life_events: list | None = None, display_month: bool = True):
+def run_fire_model(inputs: dict | None, property_list: list | None, life_events: list | None = None, stock_contribution_overrides: list | None = None, display_month: bool = True):
     import pandas as pd
     import numpy as np
     from datetime import date
@@ -123,6 +123,8 @@ def run_fire_model(inputs: dict | None, property_list: list | None, life_events:
         property_list = []
     if life_events is None:
         life_events = []
+    if stock_contribution_overrides is None:
+        stock_contribution_overrides = []
 
     ###debugging###
     required_input_keys = set(inputs_default.keys())
@@ -616,6 +618,19 @@ def run_fire_model(inputs: dict | None, property_list: list | None, life_events:
     target_monthly_arr = (dfm["Target_Annual_Infl_Adj"].to_numpy(dtype=float) / 12.0)
 
     stock_contrib_monthly_arr = dfm["Stock_Contribution_Monthly"].to_numpy(dtype=float)
+
+    # Per-year overrides of the annual stock contribution (e.g. "I only
+    # actually invested $5k in 2027, cash was tight") replace the flat
+    # inflation-adjusted default for every month in that calendar year.
+    if stock_contribution_overrides:
+        override_monthly_by_year = {
+            int(o["year"]): float(o.get("amount", 0) or 0) / 12.0
+            for o in stock_contribution_overrides if o.get("year") is not None
+        }
+        for _yr, _monthly in override_monthly_by_year.items():
+            stock_contrib_monthly_arr[years_arr == _yr] = _monthly
+        dfm["Stock_Contribution_Monthly"] = stock_contrib_monthly_arr  # keep debug column in sync
+
     super_extra_monthly_arr = dfm["Super_Extra_Monthly"].to_numpy(dtype=float)
     age_arr = dfm["Age"].to_numpy(dtype=float)
 
