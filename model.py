@@ -619,16 +619,17 @@ def run_fire_model(inputs: dict | None, property_list: list | None, life_events:
 
     stock_contrib_monthly_arr = dfm["Stock_Contribution_Monthly"].to_numpy(dtype=float).copy()
 
-    # Per-year overrides of the annual stock contribution (e.g. "I only
-    # actually invested $5k in 2027, cash was tight") replace the flat
-    # inflation-adjusted default for every month in that calendar year.
+    # Per-year ADDITIONAL stock contribution (e.g. "I put in an extra $5k in
+    # 2027 from a bonus", or a negative amount because cash was tight that
+    # year) — adds to the normal inflation-adjusted contribution for every
+    # month in that calendar year, it does not replace it.
     if stock_contribution_overrides:
-        override_monthly_by_year = {
+        additional_monthly_by_year = {
             int(o["year"]): float(o.get("amount", 0) or 0) / 12.0
             for o in stock_contribution_overrides if o.get("year") is not None
         }
-        for _yr, _monthly in override_monthly_by_year.items():
-            stock_contrib_monthly_arr[years_arr == _yr] = _monthly
+        for _yr, _additional_monthly in additional_monthly_by_year.items():
+            stock_contrib_monthly_arr[years_arr == _yr] += _additional_monthly
         dfm["Stock_Contribution_Monthly"] = stock_contrib_monthly_arr  # keep debug column in sync
 
     super_extra_monthly_arr = dfm["Super_Extra_Monthly"].to_numpy(dtype=float)
