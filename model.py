@@ -617,7 +617,7 @@ def run_fire_model(inputs: dict | None, property_list: list | None, life_events:
     expenses_monthly_arr = dfm["Expenses_Monthly"].to_numpy(dtype=float)
     target_monthly_arr = (dfm["Target_Annual_Infl_Adj"].to_numpy(dtype=float) / 12.0)
 
-    stock_contrib_monthly_arr = dfm["Stock_Contribution_Monthly"].to_numpy(dtype=float)
+    stock_contrib_monthly_arr = dfm["Stock_Contribution_Monthly"].to_numpy(dtype=float).copy()
 
     # Per-year overrides of the annual stock contribution (e.g. "I only
     # actually invested $5k in 2027, cash was tight") replace the flat
